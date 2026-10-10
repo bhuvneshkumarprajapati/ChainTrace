@@ -1,0 +1,22 @@
+
+services:
+  frontend-prod:
+    image: chaintrace-frontend-prod
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    image: chaintrace-backend
+    env_file:
+      - ./server/.env
+    environment:
+      PORT: 5000
+      BLOCKCHAIN_RPC_URL: http://host.docker.internal:8545
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "5000"
+    restart: unless-stopped
