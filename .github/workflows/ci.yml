@@ -61,7 +61,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Create CI-only environment file
+        shell: bash
+        run: |
+          touch server/.env
+          echo "SEPOLIA_RPC_URL=https://example.invalid" >> "$GITHUB_ENV"
+
       - name: Validate Docker Compose
+        env:
+          SEPOLIA_RPC_URL: ${{ env.SEPOLIA_RPC_URL }}
         run: docker compose config --quiet
 
       - name: Build backend image
