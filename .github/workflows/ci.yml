@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   backend-tests:
     name: Backend Tests
@@ -68,8 +71,6 @@ jobs:
           echo "SEPOLIA_RPC_URL=https://example.invalid" >> "$GITHUB_ENV"
 
       - name: Validate Docker Compose
-        env:
-          SEPOLIA_RPC_URL: ${{ env.SEPOLIA_RPC_URL }}
         run: docker compose config --quiet
 
       - name: Build backend image
@@ -77,3 +78,25 @@ jobs:
 
       - name: Build production frontend image
         run: docker build -t chaintrace-frontend:ci -f Dockerfile.prod .
+
+  image-security-scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build backend image for scanning
+        run: docker build -t chaintrace-backend:scan ./server
+
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.33.0
+        with:
+          image-ref: chaintrace-backend:scan
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
