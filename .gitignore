@@ -46,3 +46,14 @@ blockchain/artifacts/
 blockchain/cache/
 blockchain/types/
 dist/
+
+# Local backups and test data
+*.backup.js
+CT-TEST-004-backup.json
+repair-ct-test-004.js
+
+# Local Postman workspace data
+.postman/
+postman/
+
+server/src/controllers/verificationController.js.backup
