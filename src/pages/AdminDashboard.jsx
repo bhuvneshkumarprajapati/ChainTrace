@@ -11,6 +11,7 @@ import {
   Loader2,
   Package,
   RefreshCw,
+  Search,
   ExternalLink,
   ShieldCheck,
   Trash2,
@@ -21,6 +22,21 @@ import {
 } from "lucide-react";
 
 import api from "../services/api";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  Tooltip,
+  Legend,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+} from "recharts";
 
 const roleConfig = {
   ADMIN: {
@@ -149,6 +165,9 @@ export default function AdminDashboard() {
   // ============================
   const [verificationHistory, setVerificationHistory] = useState([]);
   const [verificationLoading, setVerificationLoading] = useState(true);
+  const [verificationSearch, setVerificationSearch] = useState("");
+  const [verificationResultFilter, setVerificationResultFilter] = useState("ALL");
+  const [trendRange, setTrendRange] = useState(7);
 
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
@@ -646,6 +665,173 @@ export default function AdminDashboard() {
       />
     );
   }
+
+  const normalizedVerificationSearch = verificationSearch.trim().toLowerCase();
+  const filteredVerificationHistory = verificationHistory.filter((verification) => {
+    const productId = (
+      verification.product?.productId ||
+      verification.scannedProductId ||
+      ""
+    ).toLowerCase();
+    const productName = (verification.product?.name || "").toLowerCase();
+    const resultMatches =
+      verificationResultFilter === "ALL" ||
+      verification.verificationResult === verificationResultFilter;
+    const searchMatches =
+      !normalizedVerificationSearch ||
+      productId.includes(normalizedVerificationSearch) ||
+      productName.includes(normalizedVerificationSearch);
+
+    return resultMatches && searchMatches;
+  });
+
+  // Build the selected date range first so every analytics component
+  // (KPI cards, result chart, method chart, and daily trend) uses the same
+  // date window. The source history remains unchanged for search/filter/table.
+  // Build a local-date series from the verification records already loaded.
+  // The selected range includes today and the preceding (range - 1) days.
+  const verificationTrendData = (() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const days = Array.from({ length: trendRange }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (trendRange - 1 - index));
+      const key = [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, "0"),
+        String(date.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      return {
+        key,
+        date,
+        label: date.toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+        }),
+        authentic: 0,
+        warnings: 0,
+        notVerified: 0,
+        total: 0,
+      };
+    });
+
+    const dayIndex = new Map(days.map((day, index) => [day.key, index]));
+
+    verificationHistory.forEach((item) => {
+      if (!item.createdAt) return;
+
+      const timestamp = new Date(item.createdAt);
+      if (Number.isNaN(timestamp.getTime())) return;
+
+      const key = [
+        timestamp.getFullYear(),
+        String(timestamp.getMonth() + 1).padStart(2, "0"),
+        String(timestamp.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      const index = dayIndex.get(key);
+      if (index === undefined) return;
+
+      const day = days[index];
+      day.total += 1;
+
+      if (item.verificationResult === "AUTHENTIC") {
+        day.authentic += 1;
+      } else if (item.verificationResult === "WARNING") {
+        day.warnings += 1;
+      } else if (item.verificationResult === "NOT_VERIFIED") {
+        day.notVerified += 1;
+      }
+    });
+
+    return days;
+  })();
+
+  const selectedTrendKeys = new Set(
+    verificationTrendData.map((day) => day.key)
+  );
+
+  const verificationRangeHistory = verificationHistory.filter((item) => {
+    if (!item.createdAt) return false;
+
+    const timestamp = new Date(item.createdAt);
+    if (Number.isNaN(timestamp.getTime())) return false;
+
+    const key = [
+      timestamp.getFullYear(),
+      String(timestamp.getMonth() + 1).padStart(2, "0"),
+      String(timestamp.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    return selectedTrendKeys.has(key);
+  });
+
+  const verificationAnalytics = {
+    total: verificationRangeHistory.length,
+    authentic: verificationRangeHistory.filter(
+      (item) => item.verificationResult === "AUTHENTIC"
+    ).length,
+    warnings: verificationRangeHistory.filter(
+      (item) => item.verificationResult === "WARNING"
+    ).length,
+    notVerified: verificationRangeHistory.filter(
+      (item) => item.verificationResult === "NOT_VERIFIED"
+    ).length,
+    blockchainVerified: verificationRangeHistory.filter(
+      (item) => item.blockchainVerified === true
+    ).length,
+  };
+
+  const blockchainSuccessRate = verificationAnalytics.total
+    ? Math.round(
+        (verificationAnalytics.blockchainVerified /
+          verificationAnalytics.total) *
+          100
+      )
+    : 0;
+
+  const verificationResultChartData = [
+    { name: "Authentic", value: verificationAnalytics.authentic, color: "#34d399" },
+    { name: "Warning", value: verificationAnalytics.warnings, color: "#fbbf24" },
+    { name: "Not verified", value: verificationAnalytics.notVerified, color: "#f87171" },
+  ].filter((item) => item.value > 0);
+
+  const verificationMethodCounts = verificationRangeHistory.reduce(
+    (counts, item) => {
+      const method = item.verificationMethod || "UNKNOWN";
+      counts[method] = (counts[method] || 0) + 1;
+      return counts;
+    },
+    {}
+  );
+
+  const verificationMethodChartData = [
+    { method: "QR Code", count: verificationMethodCounts.QR_CODE || 0 },
+    { method: "Product ID", count: verificationMethodCounts.PRODUCT_ID || 0 },
+    { method: "API", count: verificationMethodCounts.API || 0 },
+    {
+      method: "Other",
+      count: Object.entries(verificationMethodCounts).reduce(
+        (total, [method, count]) =>
+          ["QR_CODE", "PRODUCT_ID", "API"].includes(method)
+            ? total
+            : total + count,
+        0
+      ),
+    },
+  ];
+
+  const verificationTrendTotals = verificationTrendData.reduce(
+    (totals, day) => ({
+      total: totals.total + day.total,
+      authentic: totals.authentic + day.authentic,
+      warnings: totals.warnings + day.warnings,
+      notVerified: totals.notVerified + day.notVerified,
+    }),
+    { total: 0, authentic: 0, warnings: 0, notVerified: 0 }
+  );
 
   return (
     <div className="min-h-screen bg-[#05070a] text-white">
@@ -1577,6 +1763,337 @@ export default function AdminDashboard() {
         </section>
 
         {/* ================================================== */}
+        {/* VERIFICATION ANALYTICS */}
+        {/* ================================================== */}
+
+        <section className="mt-10">
+          <div className="mb-5">
+            <p className="text-xs uppercase tracking-[0.2em] text-zinc-500">
+              Insights
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              Verification Analytics
+            </h2>
+            <p className="mt-2 text-sm text-zinc-500">
+              Overview of verification attempts within the selected date range.
+            </p>
+            <p className="mt-2 text-xs text-zinc-600">
+              The KPI cards and both summary charts follow the Daily Verification Trend range selector below.
+            </p>
+          </div>
+
+          {verificationLoading ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="h-32 animate-pulse rounded-2xl border border-white/10 bg-white/[0.03]"
+                />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                  <p className="text-sm text-zinc-400">Total attempts</p>
+                  <p className="mt-2 text-3xl font-semibold text-white">
+                    {verificationAnalytics.total}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-500">Attempts in selected range</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[0.04] p-5">
+                  <p className="text-sm text-zinc-400">Authentic results</p>
+                  <p className="mt-2 text-3xl font-semibold text-emerald-300">
+                    {verificationAnalytics.authentic}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-500">Marked AUTHENTIC by verification</p>
+                </div>
+                <div className="rounded-2xl border border-yellow-400/15 bg-yellow-400/[0.04] p-5">
+                  <p className="text-sm text-zinc-400">Warnings</p>
+                  <p className="mt-2 text-3xl font-semibold text-yellow-300">
+                    {verificationAnalytics.warnings}
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-500">Records marked WARNING</p>
+                </div>
+                <div className="rounded-2xl border border-cyan-400/15 bg-cyan-400/[0.04] p-5">
+                  <p className="text-sm text-zinc-400">Blockchain success rate</p>
+                  <p className="mt-2 text-3xl font-semibold text-cyan-300">
+                    {blockchainSuccessRate}%
+                  </p>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    {verificationAnalytics.blockchainVerified} of {verificationAnalytics.total} records have blockchainVerified = true
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+                  <div className="mb-4">
+                    <h3 className="font-medium text-white">Verification Results</h3>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Breakdown by result for the selected date range.
+                    </p>
+                  </div>
+                  {verificationAnalytics.total === 0 ? (
+                    <div className="flex h-64 items-center justify-center text-sm text-zinc-500">
+                      No verification data available yet.
+                    </div>
+                  ) : verificationResultChartData.length === 0 ? (
+                    <div className="flex h-64 items-center justify-center text-sm text-zinc-500">
+                      No categorized verification results available.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <PieChart>
+                        <Pie
+                          data={verificationResultChartData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="46%"
+                          innerRadius={62}
+                          outerRadius={92}
+                          paddingAngle={3}
+                          stroke="none"
+                        >
+                          {verificationResultChartData.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#090b10",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: "12px",
+                            color: "#fff",
+                          }}
+                          itemStyle={{ color: "#e4e4e7" }}
+                        />
+                        <Legend
+                          verticalAlign="bottom"
+                          formatter={(value) => (
+                            <span style={{ color: "#a1a1aa", fontSize: 12 }}>
+                              {value}
+                            </span>
+                          )}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                  <div className="mt-2 grid grid-cols-3 gap-2 border-t border-white/10 pt-4 text-center">
+                    <div>
+                      <p className="text-lg font-semibold text-emerald-300">
+                        {verificationAnalytics.authentic}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">Authentic</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-yellow-300">
+                        {verificationAnalytics.warnings}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">Warnings</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-semibold text-red-300">
+                        {verificationAnalytics.notVerified}
+                      </p>
+                      <p className="text-[10px] text-zinc-500">Not verified</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+                  <div className="mb-4">
+                    <h3 className="font-medium text-white">Verification Methods</h3>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Number of verification records by method in the selected date range.
+                    </p>
+                  </div>
+                  {verificationAnalytics.total === 0 ? (
+                    <div className="flex h-64 items-center justify-center text-sm text-zinc-500">
+                      No verification data available yet.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={280}>
+                      <BarChart
+                        data={verificationMethodChartData}
+                        margin={{ top: 8, right: 8, left: -18, bottom: 4 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="rgba(255,255,255,0.08)"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="method"
+                          tick={{ fill: "#a1a1aa", fontSize: 11 }}
+                          axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          allowDecimals={false}
+                          tick={{ fill: "#a1a1aa", fontSize: 11 }}
+                          axisLine={false}
+                          tickLine={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#090b10",
+                            border: "1px solid rgba(255,255,255,0.12)",
+                            borderRadius: "12px",
+                            color: "#fff",
+                          }}
+                          cursor={{ fill: "rgba(255,255,255,0.04)" }}
+                        />
+                        <Bar
+                          dataKey="count"
+                          name="Attempts"
+                          fill="#34d399"
+                          radius={[7, 7, 0, 0]}
+                          maxBarSize={56}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                  <p className="mt-2 border-t border-white/10 pt-4 text-xs text-zinc-500">
+                    Method counts use the verificationMethod field for the selected date range.
+                  </p>
+                </div>
+              </div>
+
+              {/* Daily Verification Trend */}
+              <div className="mt-4 rounded-3xl border border-white/10 bg-white/[0.03] p-5 sm:p-6">
+                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h3 className="font-medium text-white">Daily Verification Trend</h3>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      Daily result counts from the currently loaded verification history.
+                    </p>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-zinc-400">
+                    <span>Time range</span>
+                    <select
+                      value={trendRange}
+                      onChange={(event) => setTrendRange(Number(event.target.value))}
+                      aria-label="Daily verification trend time range"
+                      className="rounded-lg border border-white/10 bg-[#0b0d10] px-3 py-2 text-xs text-zinc-300 outline-none focus:border-emerald-400/40"
+                    >
+                      <option value={7}>Last 7 days</option>
+                      <option value={30}>Last 30 days</option>
+                      <option value={90}>Last 90 days</option>
+                    </select>
+                  </label>
+                </div>
+
+                {verificationTrendTotals.total === 0 ? (
+                  <div className="flex h-72 items-center justify-center text-sm text-zinc-500">
+                    No verification records in the selected date range.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart
+                      data={verificationTrendData}
+                      margin={{ top: 8, right: 12, left: -16, bottom: 4 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        stroke="rgba(255,255,255,0.08)"
+                        vertical={false}
+                      />
+                      <XAxis
+                        dataKey="label"
+                        minTickGap={20}
+                        tick={{ fill: "#a1a1aa", fontSize: 11 }}
+                        axisLine={{ stroke: "rgba(255,255,255,0.12)" }}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        tick={{ fill: "#a1a1aa", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#090b10",
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          borderRadius: "12px",
+                          color: "#fff",
+                        }}
+                        labelStyle={{ color: "#e4e4e7" }}
+                        itemStyle={{ color: "#e4e4e7" }}
+                      />
+                      <Legend
+                        verticalAlign="bottom"
+                        formatter={(value) => (
+                          <span style={{ color: "#a1a1aa", fontSize: 12 }}>
+                            {value}
+                          </span>
+                        )}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="authentic"
+                        name="Authentic"
+                        stroke="#34d399"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="warnings"
+                        name="Warning"
+                        stroke="#fbbf24"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="notVerified"
+                        name="Not verified"
+                        stroke="#f87171"
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+
+                <div className="mt-2 grid grid-cols-2 gap-3 border-t border-white/10 pt-4 sm:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-zinc-500">Attempts in range</p>
+                    <p className="mt-1 text-lg font-semibold text-white">
+                      {verificationTrendTotals.total}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Authentic</p>
+                    <p className="mt-1 text-lg font-semibold text-emerald-300">
+                      {verificationTrendTotals.authentic}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Warnings</p>
+                    <p className="mt-1 text-lg font-semibold text-yellow-300">
+                      {verificationTrendTotals.warnings}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500">Not verified</p>
+                    <p className="mt-1 text-lg font-semibold text-red-300">
+                      {verificationTrendTotals.notVerified}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* ================================================== */}
         {/* VERIFICATION HISTORY */}
         {/* ================================================== */}
 
@@ -1588,15 +2105,45 @@ export default function AdminDashboard() {
               <p className="mt-2 text-sm text-zinc-500">
                 Review product verification results and blockchain proof.
               </p>
+              <p className="mt-2 text-xs text-zinc-600">
+                Showing {filteredVerificationHistory.length} of {verificationHistory.length} records
+              </p>
             </div>
-            <button
-              onClick={fetchVerificationHistory}
-              disabled={verificationLoading}
-              className="inline-flex w-fit items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
-            >
-              <RefreshCw size={14} className={verificationLoading ? "animate-spin" : ""} />
-              Refresh Verification
-            </button>
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <label className="relative block min-w-0 sm:min-w-[230px]">
+                <Search
+                  size={15}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                />
+                <input
+                  type="search"
+                  value={verificationSearch}
+                  onChange={(event) => setVerificationSearch(event.target.value)}
+                  placeholder="Search product ID or name"
+                  aria-label="Search verification history by product ID or name"
+                  className="w-full rounded-xl border border-white/10 bg-black/30 py-2.5 pl-9 pr-3 text-xs text-white outline-none placeholder:text-zinc-600 focus:border-emerald-400/40"
+                />
+              </label>
+              <select
+                value={verificationResultFilter}
+                onChange={(event) => setVerificationResultFilter(event.target.value)}
+                aria-label="Filter verification results"
+                className="rounded-xl border border-white/10 bg-[#0b0d10] px-3 py-2.5 text-xs text-zinc-300 outline-none focus:border-emerald-400/40"
+              >
+                <option value="ALL">All results</option>
+                <option value="AUTHENTIC">Authentic</option>
+                <option value="WARNING">Warning</option>
+                <option value="NOT_VERIFIED">Not verified</option>
+              </select>
+              <button
+                onClick={fetchVerificationHistory}
+                disabled={verificationLoading}
+                className="inline-flex w-fit items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs text-zinc-300 transition hover:bg-white/[0.06] hover:text-white disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={verificationLoading ? "animate-spin" : ""} />
+                Refresh
+              </button>
+            </div>
           </div>
 
           <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.03]">
@@ -1610,6 +2157,21 @@ export default function AdminDashboard() {
               <div className="px-6 py-16 text-center">
                 <ShieldCheck size={32} className="mx-auto text-zinc-600" />
                 <p className="mt-4 text-sm text-zinc-400">No verification history found.</p>
+              </div>
+            ) : filteredVerificationHistory.length === 0 ? (
+              <div className="px-6 py-16 text-center">
+                <Search size={30} className="mx-auto text-zinc-600" />
+                <p className="mt-4 text-sm text-zinc-400">No records match these filters.</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVerificationSearch("");
+                    setVerificationResultFilter("ALL");
+                  }}
+                  className="mt-3 text-xs text-emerald-300 hover:text-emerald-200"
+                >
+                  Clear filters
+                </button>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1626,7 +2188,7 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {verificationHistory.map((verification) => {
+                    {filteredVerificationHistory.map((verification) => {
                       const resultStyles = {
                         AUTHENTIC: "border-emerald-400/20 bg-emerald-400/10 text-emerald-300",
                         WARNING: "border-yellow-400/20 bg-yellow-400/10 text-yellow-300",
@@ -1640,7 +2202,7 @@ export default function AdminDashboard() {
                       return (
                         <tr key={verification._id} className="transition hover:bg-white/[0.02]">
                           <td className="px-5 py-5">
-                            <p className="text-sm font-semibold text-emerald-300">{verification.product?.productId || "—"}</p>
+                            <p className="text-sm font-semibold text-emerald-300">{verification.product?.productId || verification.scannedProductId || "—"}</p>
                             <p className="mt-1 text-sm text-white">{verification.product?.name || "Unknown Product"}</p>
                             <p className="mt-1 text-xs text-zinc-600">{verification.product?.category || "—"}</p>
                           </td>

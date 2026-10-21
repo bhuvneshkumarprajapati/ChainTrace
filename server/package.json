@@ -1,4 +1,3 @@
-
 {
   "name": "server",
   "version": "1.0.0",
@@ -6,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test": "node tests/productHashService.test.js && node tests/verificationLogic.test.js && node tests/productTampering.test.js"
   },
   "keywords": [],
   "author": "",

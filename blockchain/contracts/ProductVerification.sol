@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+
+ // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 contract ProductVerification {
@@ -22,7 +23,6 @@ contract ProductVerification {
     }
 
     mapping(string => Product) private products;
-
     mapping(string => SupplyChainEvent[]) private productHistory;
 
     event ProductRegistered(
@@ -47,13 +47,19 @@ contract ProductVerification {
         uint256 timestamp
     );
 
-    // =========================
     // REGISTER PRODUCT
-    // =========================
     function registerProduct(
         string memory _productId,
         string memory _productHash
     ) external {
+        require(
+            bytes(_productId).length > 0,
+            "Product ID is required"
+        );
+        require(
+            bytes(_productHash).length > 0,
+            "Product hash is required"
+        );
         require(
             !products[_productId].exists,
             "Product already registered"
@@ -88,9 +94,7 @@ contract ProductVerification {
         );
     }
 
-    // =========================
     // TRANSFER PRODUCT
-    // =========================
     function transferProduct(
         string memory _productId,
         address _newOwner,
@@ -101,20 +105,20 @@ contract ProductVerification {
             products[_productId].exists,
             "Product does not exist"
         );
-
         require(
             products[_productId].currentOwner == msg.sender,
             "Only current owner can transfer"
         );
-
         require(
             _newOwner != address(0),
             "Invalid new owner"
         );
+        require(
+            _newOwner != msg.sender,
+            "Already the current owner"
+        );
 
-        address previousOwner =
-            products[_productId].currentOwner;
-
+        address previousOwner = products[_productId].currentOwner;
         products[_productId].currentOwner = _newOwner;
 
         productHistory[_productId].push(
@@ -137,9 +141,7 @@ contract ProductVerification {
         );
     }
 
-    // =========================
     // ADD SUPPLY CHAIN EVENT
-    // =========================
     function addSupplyChainEvent(
         string memory _productId,
         string memory _eventType,
@@ -151,6 +153,14 @@ contract ProductVerification {
         require(
             products[_productId].exists,
             "Product does not exist"
+        );
+        require(
+            products[_productId].currentOwner == msg.sender,
+            "Only current owner can add events"
+        );
+        require(
+            bytes(_eventType).length > 0,
+            "Event type is required"
         );
 
         productHistory[_productId].push(
@@ -174,9 +184,7 @@ contract ProductVerification {
         );
     }
 
-    // =========================
     // VERIFY PRODUCT
-    // =========================
     function verifyProduct(
         string memory _productId,
         string memory _productHash
@@ -192,11 +200,7 @@ contract ProductVerification {
         Product memory product = products[_productId];
 
         if (!product.exists) {
-            return (
-                false,
-                address(0),
-                address(0)
-            );
+            return (false, address(0), address(0));
         }
 
         bool hashMatches =
@@ -210,12 +214,8 @@ contract ProductVerification {
         );
     }
 
-    // =========================
     // GET PRODUCT
-    // =========================
-    function getProduct(
-        string memory _productId
-    )
+    function getProduct(string memory _productId)
         external
         view
         returns (
@@ -239,12 +239,8 @@ contract ProductVerification {
         );
     }
 
-    // =========================
     // GET PRODUCT HISTORY
-    // =========================
-    function getProductHistory(
-        string memory _productId
-    )
+    function getProductHistory(string memory _productId)
         external
         view
         returns (SupplyChainEvent[] memory)
@@ -252,12 +248,12 @@ contract ProductVerification {
         return productHistory[_productId];
     }
 
-    // =========================
     // CHECK PRODUCT EXISTS
-    // =========================
-    function productExists(
-        string memory _productId
-    ) external view returns (bool) {
+    function productExists(string memory _productId)
+        external
+        view
+        returns (bool)
+    {
         return products[_productId].exists;
     }
 }

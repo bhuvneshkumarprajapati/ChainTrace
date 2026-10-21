@@ -1,24 +1,70 @@
+
 const Product = require("../models/Product");
 const Verification = require("../models/Verification");
 const Notification = require("../models/Notification");
+const {
+  generateProductHash,
+} = require("../services/productHashService");
 
 const {
   verifyProductOnBlockchain,
 } = require("../services/blockchainService");
+
+// Normalize wallet addresses before comparing them.
+const normalizeWalletAddress = (address) => {
+  if (address === null || address === undefined) {
+    return null;
+  }
+
+  const normalized = String(address).trim().toLowerCase();
+  return normalized || null;
+};
+
+// Identify temporary blockchain RPC/provider errors.
+const isTemporaryBlockchainError = (error) => {
+  const errorCode = String(
+    error?.code ||
+      error?.info?.error?.code ||
+      error?.error?.code ||
+      error?.cause?.code ||
+      ""
+  ).toUpperCase();
+
+  const errorMessage = String(
+    error?.shortMessage || error?.message || ""
+  ).toLowerCase();
+
+  const temporaryCodes = new Set([
+    "TIMEOUT",
+    "NETWORK_ERROR",
+    "SERVER_ERROR",
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "ETIMEDOUT",
+    "EAI_AGAIN",
+  ]);
+
+  return (
+    temporaryCodes.has(errorCode) ||
+    errorMessage.includes("timeout") ||
+    errorMessage.includes("timed out") ||
+    errorMessage.includes("network error") ||
+    errorMessage.includes("failed to fetch") ||
+    errorMessage.includes("socket hang up") ||
+    errorMessage.includes("connection reset") ||
+    errorMessage.includes("connection refused") ||
+    errorMessage.includes("could not detect network")
+  );
+};
 
 // ====================
 // VERIFY PRODUCT
 // ====================
 const verifyProduct = async (req, res) => {
   try {
-    const {
-      productId,
-      scannedHash,
-    } = req.body;
+    const { productId, scannedHash } = req.body;
 
-    // ========================================
-    // Validate Product ID
-    // ========================================
+    // Validate Product ID.
     if (!productId) {
       return res.status(400).json({
         success: false,
@@ -26,182 +72,109 @@ const verifyProduct = async (req, res) => {
       });
     }
 
-    const normalizedProductId =
-      String(productId)
-        .trim()
-        .toUpperCase();
+    const normalizedProductId = String(productId)
+      .trim()
+      .toUpperCase();
 
-    const normalizedScannedValue =
-      String(scannedHash || "")
-        .trim();
+    const normalizedScannedValue = String(
+      scannedHash || ""
+    ).trim();
 
-    // ========================================
-    // Find Product
-    // ========================================
-    const product =
-      await Product.findOne({
-        productId:
-          normalizedProductId,
-      })
-        .populate(
-          "manufacturer",
-          "name email organization role walletAddress"
-        )
-        .populate(
-          "currentOwner",
-          "name email organization role walletAddress"
-        );
+    // Find product and populate manufacturer/owner details.
+    const product = await Product.findOne({
+      productId: normalizedProductId,
+    })
+      .populate(
+        "manufacturer",
+        "name email organization role walletAddress"
+      )
+      .populate(
+        "currentOwner",
+        "name email organization role walletAddress"
+      );
 
-    // ========================================
-    // PRODUCT NOT FOUND
-    // ========================================
+    // Product not found.
     if (!product) {
-      const verification =
-        await Verification.create({
-          verificationMethod:
-            normalizedScannedValue
-              ? "QR_CODE"
-              : "PRODUCT_ID",
-
-          verificationResult:
-            "NOT_VERIFIED",
-
-          riskLevel:
-            "HIGH",
-
-          scannedProductId:
-            normalizedProductId,
-
-          scannedHash:
-            normalizedScannedValue,
-
-          blockchainVerified:
-            false,
-
-          ownershipValid:
-            false,
-
-          qrReuseDetected:
-            false,
-
-          notes:
-            "Product ID was not found in the ChainTrace registry.",
-
-          ipAddress:
-            req.ip,
-        });
+      const verification = await Verification.create({
+        verificationMethod: normalizedScannedValue
+          ? "QR_CODE"
+          : "PRODUCT_ID",
+        verificationResult: "NOT_VERIFIED",
+        riskLevel: "HIGH",
+        scannedProductId: normalizedProductId,
+        scannedHash: normalizedScannedValue,
+        blockchainVerified: false,
+        ownershipValid: false,
+        qrReuseDetected: false,
+        notes:
+          "Product ID was not found in the ChainTrace registry.",
+        ipAddress: req.ip,
+      });
 
       return res.status(404).json({
         success: false,
-
-        message:
-          "Product not verified",
-
-        result:
-          "NOT_VERIFIED",
-
-        riskLevel:
-          "HIGH",
-
+        message: "Product not verified",
+        result: "NOT_VERIFIED",
+        riskLevel: "HIGH",
         verification,
       });
     }
 
-    // ========================================
-    // QR / SCANNED VALUE CHECK
-    //
-    // Our QR currently contains Product ID.
-    // ========================================
-    const qrMatches =
-      product.qrCode
-        ? (
-            normalizedProductId ===
-              product.qrCode.toUpperCase() ||
+    // QR currently contains the Product ID.
+    const qrCode = String(product.qrCode || "").trim();
 
-            normalizedScannedValue ===
-              product.qrCode ||
+    const qrMatches = qrCode
+      ? (
+          normalizedProductId === qrCode.toUpperCase() ||
+          normalizedScannedValue === qrCode ||
+          normalizedScannedValue === normalizedProductId
+        )
+      : (
+          !normalizedScannedValue ||
+          normalizedScannedValue === normalizedProductId
+        );
 
-            normalizedScannedValue ===
-              normalizedProductId
-          )
-        : (
-            !normalizedScannedValue ||
-            normalizedScannedValue ===
-              normalizedProductId
-          );
+    // Recalculate hash from the stored product details.
+    const recalculatedProductHash = generateProductHash({
+      productId: product.productId,
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      location: product.location,
+      ipfsHash: product.ipfsHash,
+    });
 
-    // ========================================
-    // HASH CHECK
-    // ========================================
-    let hashMatches = true;
-
-    if (
-      normalizedScannedValue &&
-      normalizedScannedValue !==
-        normalizedProductId
-    ) {
-      hashMatches =
-        normalizedScannedValue ===
-        product.productHash;
-    }
+    const hashMatches =
+      recalculatedProductHash.toLowerCase() ===
+      String(product.productHash || "").toLowerCase();
 
     // ========================================
     // REAL BLOCKCHAIN VERIFICATION
     // ========================================
-    let blockchainVerified =
-      false;
-
-    let blockchainManufacturer =
-      null;
-
-    let blockchainCurrentOwner =
-      null;
+    let blockchainVerified = false;
+    let blockchainManufacturer = null;
+    let blockchainCurrentOwner = null;
 
     try {
       const blockchainResult =
         await verifyProductOnBlockchain(
           normalizedProductId,
-          product.productHash
+          recalculatedProductHash
         );
 
-      blockchainVerified =
-        Boolean(
-          blockchainResult.valid
-        );
+      blockchainVerified = Boolean(blockchainResult.valid);
+      blockchainManufacturer = blockchainResult.manufacturer;
+      blockchainCurrentOwner = blockchainResult.currentOwner;
 
-      blockchainManufacturer =
-        blockchainResult.manufacturer;
-
-      blockchainCurrentOwner =
-        blockchainResult.currentOwner;
-
-      console.log(
-        "================================="
-      );
-
-      console.log(
-        "BLOCKCHAIN VERIFICATION"
-      );
-
-      console.log(
-        "================================="
-      );
-
-      console.log(
-        "Product:",
-        normalizedProductId
-      );
-
-      console.log(
-        "Valid:",
-        blockchainVerified
-      );
-
+      console.log("=================================");
+      console.log("BLOCKCHAIN VERIFICATION");
+      console.log("=================================");
+      console.log("Product:", normalizedProductId);
+      console.log("Valid:", blockchainVerified);
       console.log(
         "Blockchain manufacturer:",
         blockchainManufacturer
       );
-
       console.log(
         "Blockchain current owner:",
         blockchainCurrentOwner
@@ -212,251 +185,183 @@ const verifyProduct = async (req, res) => {
         blockchainError.message
       );
 
-      blockchainVerified =
-        false;
+      // A temporary RPC failure is not proof of counterfeiting.
+      // Do not create a false WARNING record or notification.
+      if (isTemporaryBlockchainError(blockchainError)) {
+        return res.status(503).json({
+          success: false,
+          code: "BLOCKCHAIN_TEMPORARILY_UNAVAILABLE",
+          message:
+            "Blockchain verification is temporarily unavailable. Please retry in a few seconds.",
+          retryable: true,
+          productId: normalizedProductId,
+        });
+      }
+
+      // Unexpected errors must not be silently treated as a
+      // genuine blockchain mismatch.
+      throw blockchainError;
     }
 
     // ========================================
-    // MONGODB OWNER WALLET
+    // NORMALIZE DATABASE AND BLOCKCHAIN WALLETS
     // ========================================
-    const mongoOwnerWallet =
+    const mongoOwnerWallet = normalizeWalletAddress(
       product.currentOwner?.walletAddress
-        ? String(
-            product.currentOwner
-              .walletAddress
-          )
-            .trim()
-            .toLowerCase()
-        : null;
+    );
 
-    // ========================================
-    // BLOCKCHAIN OWNER WALLET
-    // ========================================
-    const blockchainOwnerWallet =
+    const blockchainOwnerWallet = normalizeWalletAddress(
       blockchainCurrentOwner
-        ? String(
-            blockchainCurrentOwner
-          )
-            .trim()
-            .toLowerCase()
-        : null;
+    );
 
-    // ========================================
-    // OWNERSHIP VALIDATION
-    // ========================================
-    const ownershipValid =
-      Boolean(
-        mongoOwnerWallet &&
-        blockchainOwnerWallet &&
-        mongoOwnerWallet ===
-          blockchainOwnerWallet
-      );
-
-    // ========================================
-    // MANUFACTURER VALIDATION
-    // ========================================
-    const mongoManufacturerWallet =
+    const mongoManufacturerWallet = normalizeWalletAddress(
       product.manufacturer?.walletAddress
-        ? String(
-            product.manufacturer
-              .walletAddress
-          )
-            .trim()
-            .toLowerCase()
-        : null;
+    );
 
     const blockchainManufacturerWallet =
-      blockchainManufacturer
-        ? String(
-            blockchainManufacturer
-          )
-            .trim()
-            .toLowerCase()
-        : null;
+      normalizeWalletAddress(blockchainManufacturer);
 
-    const manufacturerValid =
-      Boolean(
-        mongoManufacturerWallet &&
-        blockchainManufacturerWallet &&
-        mongoManufacturerWallet ===
-          blockchainManufacturerWallet
-      );
+    // ========================================
+    // OWNERSHIP AND MANUFACTURER VALIDATION
+    // ========================================
+    const ownerMatch = Boolean(
+      mongoOwnerWallet &&
+      blockchainOwnerWallet &&
+      mongoOwnerWallet === blockchainOwnerWallet
+    );
+
+    const manufacturerMatch = Boolean(
+      mongoManufacturerWallet &&
+      blockchainManufacturerWallet &&
+      mongoManufacturerWallet === blockchainManufacturerWallet
+    );
+
+    const ownershipValid = ownerMatch;
+    const manufacturerValid = manufacturerMatch;
+
+    console.log("OWNERSHIP DEBUG:", {
+      productId: normalizedProductId,
+      mongoOwnerWallet,
+      blockchainOwnerWallet,
+      ownerMatch,
+      ownershipValid,
+    });
+
+    console.log("MANUFACTURER DEBUG:", {
+      productId: normalizedProductId,
+      mongoManufacturerWallet,
+      blockchainManufacturerWallet,
+      manufacturerMatch,
+      manufacturerValid,
+    });
 
     // ========================================
     // VERIFICATION RESULT
     // ========================================
-    let verificationResult =
-      "AUTHENTIC";
+    let verificationResult = "AUTHENTIC";
+    let riskLevel = "LOW";
 
-    let riskLevel =
-      "LOW";
-
-    // ========================================
-    // Hash mismatch
-    // ========================================
+    // Product hash mismatch.
     if (!hashMatches) {
-      verificationResult =
-        "WARNING";
-
-      riskLevel =
-        "HIGH";
+      verificationResult = "WARNING";
+      riskLevel = "HIGH";
     }
 
-    // ========================================
-    // QR mismatch
-    // ========================================
+    // QR mismatch.
     if (!qrMatches) {
-      verificationResult =
-        "WARNING";
-
-      riskLevel =
-        "HIGH";
+      verificationResult = "WARNING";
+      riskLevel = "HIGH";
     }
 
-    // ========================================
-    // Blockchain mismatch
-    // ========================================
+    // Blockchain mismatch.
     if (!blockchainVerified) {
-      verificationResult =
-        "WARNING";
+      verificationResult = "WARNING";
 
       if (riskLevel !== "HIGH") {
-        riskLevel =
-          "MEDIUM";
+        riskLevel = "MEDIUM";
       }
     }
 
-    // ========================================
-    // Ownership mismatch
-    // ========================================
+    // Ownership mismatch.
     if (!ownershipValid) {
-      verificationResult =
-        "WARNING";
+      verificationResult = "WARNING";
 
       if (riskLevel !== "HIGH") {
-        riskLevel =
-          "MEDIUM";
+        riskLevel = "MEDIUM";
       }
     }
 
-    // ========================================
-    // Manufacturer mismatch
-    // ========================================
+    // Manufacturer mismatch.
     if (!manufacturerValid) {
-      verificationResult =
-        "WARNING";
+      verificationResult = "WARNING";
 
       if (riskLevel !== "HIGH") {
-        riskLevel =
-          "MEDIUM";
+        riskLevel = "MEDIUM";
       }
     }
 
-    // ========================================
-    // Flagged product
-    // ========================================
-    if (
-      product.status ===
-      "FLAGGED"
-    ) {
-      verificationResult =
-        "WARNING";
-
-      riskLevel =
-        "HIGH";
+    // Flagged product.
+    if (product.status === "FLAGGED") {
+      verificationResult = "WARNING";
+      riskLevel = "HIGH";
     }
 
     // ========================================
-    // Verification notes
+    // VERIFICATION NOTES
     // ========================================
     let verificationNotes =
       "Product record, QR data, blockchain proof, manufacturer and ownership matched.";
 
-    if (
-      verificationResult !==
-      "AUTHENTIC"
-    ) {
+    if (verificationResult !== "AUTHENTIC") {
       verificationNotes =
         "Product verification requires additional review because one or more verification checks failed.";
     }
 
     // ========================================
-    // Save Verification
+    // SAVE VERIFICATION
     // ========================================
-    const verification =
-      await Verification.create({
-        product:
-          product._id,
-
-        verifiedBy:
-          req.user?._id,
-
-        verificationMethod:
-          normalizedScannedValue
-            ? "QR_CODE"
-            : "PRODUCT_ID",
-
-        verificationResult,
-
-        riskLevel,
-
-        scannedProductId:
-          product.productId,
-
-        scannedHash:
-          normalizedScannedValue,
-
-        blockchainVerified,
-
-        ownershipValid,
-
-        qrReuseDetected:
-          false,
-
-        notes:
-          verificationNotes,
-
-        ipAddress:
-          req.ip,
-      });
+    const verification = await Verification.create({
+      product: product._id,
+      verifiedBy: req.user?._id,
+      verificationMethod: normalizedScannedValue
+        ? "QR_CODE"
+        : "PRODUCT_ID",
+      verificationResult,
+      riskLevel,
+      scannedProductId: product.productId,
+      scannedHash: normalizedScannedValue,
+      blockchainVerified,
+      ownershipValid,
+      qrReuseDetected: false,
+      notes: verificationNotes,
+      ipAddress: req.ip,
+    });
 
     // ========================================
     // CREATE NOTIFICATION
     // ========================================
     try {
-      const isAuthentic =
-        verificationResult ===
-        "AUTHENTIC";
+      const isAuthentic = verificationResult === "AUTHENTIC";
 
       await Notification.create({
-        user:
-          product.manufacturer._id,
-
-        type:
-          isAuthentic
-            ? "PRODUCT_VERIFIED"
-            : "PRODUCT_FLAGGED",
-
-        title:
-          isAuthentic
-            ? "Product Verified"
-            : "Product Verification Alert",
-
-        message:
-          isAuthentic
-            ? `Product ${product.productId} was successfully verified as authentic.`
-            : `Product ${product.productId} requires attention. Verification result: ${verificationResult}, risk level: ${riskLevel}.`,
-
-        product:
-          product._id,
+        user: product.manufacturer._id,
+        type: isAuthentic
+          ? "PRODUCT_VERIFIED"
+          : "PRODUCT_FLAGGED",
+        title: isAuthentic
+          ? "Product Verified"
+          : "Product Verification Alert",
+        message: isAuthentic
+          ? `Product ${product.productId} was successfully verified as authentic.`
+          : `Product ${product.productId} requires attention. Verification result: ${verificationResult}, risk level: ${riskLevel}.`,
+        product: product._id,
       });
 
       console.log(
         `Verification notification created for manufacturer of ${product.productId}`
       );
     } catch (notificationError) {
-      // Notification failure should not
-      // affect successful verification.
+      // Notification failure must not affect verification.
       console.error(
         "VERIFICATION NOTIFICATION ERROR:",
         notificationError.message
@@ -467,108 +372,55 @@ const verifyProduct = async (req, res) => {
     // FINAL RESPONSE
     // ========================================
     return res.status(200).json({
-      success:
-        true,
-
-      message:
-        "Product verification completed",
-
-      result:
-        verificationResult,
-
+      success: true,
+      message: "Product verification completed",
+      result: verificationResult,
       riskLevel,
 
       product: {
-        id:
-          product.productId,
-
-        name:
-          product.name,
-
-        description:
-          product.description,
-
-        category:
-          product.category,
-
-        status:
-          product.status,
-
-        manufacturer:
-          product.manufacturer,
-
-        currentOwner:
-          product.currentOwner,
-
-        location:
-          product.location,
-
-        blockchainNetwork:
-          product.blockchainNetwork,
-
-        blockchainTxHash:
-          product.blockchainTxHash,
-
-        qrCode:
-          product.qrCode,
+        id: product.productId,
+        name: product.name,
+        description: product.description,
+        category: product.category,
+        status: product.status,
+        manufacturer: product.manufacturer,
+        currentOwner: product.currentOwner,
+        location: product.location,
+        blockchainNetwork: product.blockchainNetwork,
+        blockchainTxHash: product.blockchainTxHash,
+        qrCode: product.qrCode,
       },
 
       proof: {
         hashMatches,
-
         qrMatches,
-
         blockchainVerified,
-
         ownershipValid,
-
         manufacturerValid,
-
         blockchainManufacturer,
-
         blockchainCurrentOwner,
-
         mongoOwnerWallet,
-
         blockchainOwnerWallet,
+        mongoManufacturerWallet,
+        blockchainManufacturerWallet,
+        ownerMatch,
+        manufacturerMatch,
       },
 
       verification,
     });
   } catch (error) {
-    console.error(
-      "================================="
-    );
-
-    console.error(
-      "VERIFY PRODUCT ERROR"
-    );
-
-    console.error(
-      "================================="
-    );
-
+    console.error("=================================");
+    console.error("VERIFY PRODUCT ERROR");
+    console.error("=================================");
     console.error(error);
-
-    console.error(
-      "Message:",
-      error.message
-    );
-
-    console.error(
-      "Stack:",
-      error.stack
-    );
+    console.error("Message:", error.message);
+    console.error("Stack:", error.stack);
 
     return res.status(500).json({
-      success:
-        false,
-
-      message:
-        "Server error during product verification",
-
-      error:
-        error.message,
+      success: false,
+      message: "Server error during product verification",
+      error: error.message,
     });
   }
 };
@@ -579,10 +431,9 @@ const verifyProduct = async (req, res) => {
 const getVerificationHistory = async (req, res) => {
   try {
     const { productId } = req.query;
-
     const query = {};
 
-    // Optional product filter
+    // Optional product filter.
     if (productId) {
       const normalizedProductId = String(productId)
         .trim()

@@ -22,7 +22,6 @@ function RegisterProduct() {
     description: "",
     category: "",
     location: "",
-    productHash: "",
     ipfsHash: "",
     blockchainNetwork: "Ethereum",
   });
@@ -77,10 +76,6 @@ function RegisterProduct() {
         throw new Error("Product category is required.");
       }
 
-      if (!form.productHash.trim()) {
-        throw new Error("Product hash is required.");
-      }
-
       const qrDataUrl = await QRCode.toDataURL(productId, {
         width: 500,
         margin: 2,
@@ -97,7 +92,6 @@ function RegisterProduct() {
         description: form.description.trim(),
         category: form.category.trim(),
         location: form.location.trim(),
-        productHash: form.productHash.trim(),
         ipfsHash: form.ipfsHash.trim(),
         blockchainNetwork: form.blockchainNetwork,
         qrCode: productId,
@@ -136,7 +130,6 @@ function RegisterProduct() {
         description: "",
         category: "",
         location: "",
-        productHash: "",
         ipfsHash: "",
         blockchainNetwork: "Ethereum",
       });
@@ -393,15 +386,6 @@ function RegisterProduct() {
             />
 
             <div className="mt-6 grid gap-6 md:grid-cols-2">
-
-              <Field
-                label="Product Hash"
-                name="productHash"
-                value={form.productHash}
-                onChange={handleChange}
-                placeholder="hash_ct_2026_014"
-                required
-              />
 
               <Field
                 label="IPFS Hash"

@@ -16,7 +16,6 @@ const auditLogRoutes = require("./routes/auditLogRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 
 const app = express();
-
 const PORT = process.env.PORT || 5000;
 
 // ====================
@@ -29,12 +28,31 @@ connectDB();
 // ====================
 app.use(helmet());
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+  "http://localhost:5175",
+  "http://127.0.0.1:5175",
+  "http://localhost:8080",
+  "http://127.0.0.1:8080",
+  ...(process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean),
+];
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-    ],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(`Blocked by CORS: ${origin}`);
+      return callback(new Error("Origin not allowed by CORS"));
+    },
     credentials: true,
   })
 );

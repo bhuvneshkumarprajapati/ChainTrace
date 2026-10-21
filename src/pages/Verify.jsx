@@ -25,6 +25,7 @@ function Verify() {
 
   const [verificationData, setVerificationData] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [lastScannedValue, setLastScannedValue] = useState("");
 
   const scannerRef = useRef(null);
 
@@ -43,6 +44,7 @@ function Verify() {
       return;
     }
 
+    setLastScannedValue(String(scannedValue || "").trim());
     setLoading(true);
     setStatus(null);
     setVerificationData(null);
@@ -81,7 +83,16 @@ function Verify() {
 
       setVerificationData(errorData);
 
-      if (error.response?.status === 404) {
+      if (
+        error.response?.status === 503 &&
+        errorData?.code === "BLOCKCHAIN_TEMPORARILY_UNAVAILABLE"
+      ) {
+        setStatus("unavailable");
+        setErrorMessage(
+          errorData?.message ||
+            "Blockchain verification is temporarily unavailable. Please retry in a few seconds."
+        );
+      } else if (error.response?.status === 404) {
         setStatus("not-found");
         setErrorMessage(
           errorData?.message ||
@@ -122,6 +133,7 @@ function Verify() {
     setStatus(null);
     setVerificationData(null);
     setErrorMessage("");
+    setLastScannedValue("");
   }
 
   // ==========================================
@@ -401,6 +413,7 @@ function Verify() {
                       setStatus(null);
                       setVerificationData(null);
                       setErrorMessage("");
+                      setLastScannedValue("");
                     }}
                     placeholder="CT-2026-XXXX"
                     className="min-w-0 flex-1 border border-white/10 bg-black/20 px-4 py-4 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#36e6ad]/50"
@@ -437,12 +450,42 @@ function Verify() {
               </button>
 
               {/* RESULT */}
+              {loading && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="mt-8 flex items-center gap-3 border border-[#36e6ad]/20 bg-[#36e6ad]/5 p-5"
+                >
+                  <Clock3 size={20} className="animate-spin text-[#36e6ad]" />
+                  <div>
+                    <p className="text-sm font-medium text-[#36e6ad]">
+                      Verifying product on blockchain...
+                    </p>
+                    <p className="mt-1 text-xs text-white/40">
+                      Checking the product hash, QR code, ownership and manufacturer.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {status && (
                 <VerificationResult
                   status={status}
                   message={errorMessage}
                   riskLevel={verificationData?.riskLevel}
                 />
+              )}
+
+              {status === "unavailable" && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => verifyProduct(productId, lastScannedValue)}
+                  className="mt-4 flex w-full items-center justify-center gap-2 border border-yellow-400/30 px-4 py-3 text-xs font-semibold text-yellow-300 transition hover:bg-yellow-400/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Clock3 size={14} />
+                  {loading ? "Retrying verification..." : "Retry Verification"}
+                </button>
               )}
 
             </motion.div>
@@ -656,6 +699,25 @@ function VerificationResult({
             </div>
           </div>
 
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "unavailable") {
+    return (
+      <div className="mt-8 border border-yellow-400/20 bg-yellow-400/5 p-5">
+        <div className="flex items-start gap-3">
+          <Clock3 size={20} className="mt-0.5 text-yellow-300" />
+          <div>
+            <div className="text-sm font-medium text-yellow-300">
+              Blockchain temporarily unavailable
+            </div>
+            <div className="mt-1 text-xs leading-5 text-white/50">
+              {message ||
+                "The blockchain network did not respond. This does not mean the product is counterfeit. Please retry verification."}
+            </div>
+          </div>
         </div>
       </div>
     );

@@ -2,6 +2,7 @@ const Product = require("../models/Product");
 const SupplyChainEvent = require("../models/SupplyChainEvent");
 const AuditLog = require("../models/AuditLog");
 const Notification = require("../models/Notification");
+const { generateProductHash } = require("../services/productHashService");
 
 const {
   registerProductOnBlockchain,
@@ -20,22 +21,31 @@ const createProduct = async (req, res) => {
       description,
       category,
       location,
-      productHash,
+      // Hash is generated from product details below
       ipfsHash,
       blockchainNetwork,
       qrCode,
     } = req.body;
 
     // Required fields
-    if (!productId || !name || !category || !productHash) {
+    if (!productId || !name || !category) {
       return res.status(400).json({
         success: false,
         message:
-          "Product ID, name, category and product hash are required",
+          "Product ID, name and category are required",
       });
     }
 
     const normalizedProductId = productId.trim().toUpperCase();
+
+    const generatedProductHash = generateProductHash({
+      productId: normalizedProductId,
+      name,
+      description,
+      category,
+      location,
+      ipfsHash,
+    });
 
     // Check duplicate Product ID in MongoDB
     const existingProduct = await Product.findOne({
@@ -78,7 +88,7 @@ const createProduct = async (req, res) => {
     const blockchainResult =
       await registerProductOnBlockchain(
         normalizedProductId,
-        productHash
+        generatedProductHash
       );
 
     console.log(
@@ -98,7 +108,8 @@ const createProduct = async (req, res) => {
       manufacturer: req.user._id,
       currentOwner: req.user._id,
       location,
-      productHash,
+
+      productHash: generatedProductHash,// Hash is generated from product details below
       ipfsHash,
 
       // REAL blockchain transaction hash
