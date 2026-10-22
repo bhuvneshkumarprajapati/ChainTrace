@@ -92,7 +92,7 @@ jobs:
         run: docker build -t chaintrace-backend:scan ./server
 
       - name: Scan backend image
-        notepad .github\workflows\ci.yml
+        uses: aquasecurity/trivy-action@0.33.0
         with:
           image-ref: chaintrace-backend:scan
           format: table
