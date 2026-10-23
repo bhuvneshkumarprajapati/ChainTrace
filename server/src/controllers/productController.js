@@ -258,6 +258,13 @@ const createProduct = async (req, res) => {
 
 const getProducts = async (req, res) => {
   try {
+    // Temporary diagnostics for the Render database issue
+    console.log("PRODUCT DIAGNOSTICS:", {
+      database: Product.db.name,
+      collection: Product.collection.name,
+      readyState: Product.db.readyState,
+      count: await Product.countDocuments(),
+    });
     const products = await Product.find()
       .populate(
         "manufacturer",
