@@ -1,4 +1,4 @@
-```js
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -115,7 +115,7 @@ app.get("/api/health", (req, res) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route ${req.originalUrl} not found`,
+    message: "Route not found: " + req.originalUrl,
   });
 });
 
@@ -142,6 +142,5 @@ app.use((err, req, res, next) => {
 // Start Server
 // ====================
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`ChainTrace server running on port ${PORT}`);
+  console.log("ChainTrace server running on port " + PORT);
 });
-```
