@@ -5,7 +5,6 @@ const Notification = require("../models/Notification");
 const {
   generateProductHash,
 } = require("../services/productHashService");
-
 const {
   verifyProductOnBlockchain,
 } = require("../services/blockchainService");
@@ -64,7 +63,6 @@ const verifyProduct = async (req, res) => {
   try {
     const { productId, scannedHash } = req.body;
 
-    // Validate Product ID.
     if (!productId) {
       return res.status(400).json({
         success: false,
@@ -93,30 +91,14 @@ const verifyProduct = async (req, res) => {
         "name email organization role walletAddress"
       );
 
-    // Product not found.
+    // FIX: Do not create a Verification record without a product.
     if (!product) {
-      const verification = await Verification.create({
-        verificationMethod: normalizedScannedValue
-          ? "QR_CODE"
-          : "PRODUCT_ID",
-        verificationResult: "NOT_VERIFIED",
-        riskLevel: "HIGH",
-        scannedProductId: normalizedProductId,
-        scannedHash: normalizedScannedValue,
-        blockchainVerified: false,
-        ownershipValid: false,
-        qrReuseDetected: false,
-        notes:
-          "Product ID was not found in the ChainTrace registry.",
-        ipAddress: req.ip,
-      });
-
       return res.status(404).json({
         success: false,
-        message: "Product not verified",
+        message: "Product not found in the ChainTrace registry.",
         result: "NOT_VERIFIED",
         riskLevel: "HIGH",
-        verification,
+        productId: normalizedProductId,
       });
     }
 
@@ -148,9 +130,7 @@ const verifyProduct = async (req, res) => {
       recalculatedProductHash.toLowerCase() ===
       String(product.productHash || "").toLowerCase();
 
-    // ========================================
     // REAL BLOCKCHAIN VERIFICATION
-    // ========================================
     let blockchainVerified = false;
     let blockchainManufacturer = null;
     let blockchainCurrentOwner = null;
@@ -185,8 +165,7 @@ const verifyProduct = async (req, res) => {
         blockchainError.message
       );
 
-      // A temporary RPC failure is not proof of counterfeiting.
-      // Do not create a false WARNING record or notification.
+      // Temporary RPC failures are not proof of counterfeiting.
       if (isTemporaryBlockchainError(blockchainError)) {
         return res.status(503).json({
           success: false,
@@ -198,14 +177,10 @@ const verifyProduct = async (req, res) => {
         });
       }
 
-      // Unexpected errors must not be silently treated as a
-      // genuine blockchain mismatch.
       throw blockchainError;
     }
 
-    // ========================================
     // NORMALIZE DATABASE AND BLOCKCHAIN WALLETS
-    // ========================================
     const mongoOwnerWallet = normalizeWalletAddress(
       product.currentOwner?.walletAddress
     );
@@ -221,9 +196,7 @@ const verifyProduct = async (req, res) => {
     const blockchainManufacturerWallet =
       normalizeWalletAddress(blockchainManufacturer);
 
-    // ========================================
     // OWNERSHIP AND MANUFACTURER VALIDATION
-    // ========================================
     const ownerMatch = Boolean(
       mongoOwnerWallet &&
       blockchainOwnerWallet &&
@@ -255,25 +228,20 @@ const verifyProduct = async (req, res) => {
       manufacturerValid,
     });
 
-    // ========================================
     // VERIFICATION RESULT
-    // ========================================
     let verificationResult = "AUTHENTIC";
     let riskLevel = "LOW";
 
-    // Product hash mismatch.
     if (!hashMatches) {
       verificationResult = "WARNING";
       riskLevel = "HIGH";
     }
 
-    // QR mismatch.
     if (!qrMatches) {
       verificationResult = "WARNING";
       riskLevel = "HIGH";
     }
 
-    // Blockchain mismatch.
     if (!blockchainVerified) {
       verificationResult = "WARNING";
 
@@ -282,7 +250,6 @@ const verifyProduct = async (req, res) => {
       }
     }
 
-    // Ownership mismatch.
     if (!ownershipValid) {
       verificationResult = "WARNING";
 
@@ -291,7 +258,6 @@ const verifyProduct = async (req, res) => {
       }
     }
 
-    // Manufacturer mismatch.
     if (!manufacturerValid) {
       verificationResult = "WARNING";
 
@@ -300,15 +266,12 @@ const verifyProduct = async (req, res) => {
       }
     }
 
-    // Flagged product.
     if (product.status === "FLAGGED") {
       verificationResult = "WARNING";
       riskLevel = "HIGH";
     }
 
-    // ========================================
     // VERIFICATION NOTES
-    // ========================================
     let verificationNotes =
       "Product record, QR data, blockchain proof, manufacturer and ownership matched.";
 
@@ -317,9 +280,7 @@ const verifyProduct = async (req, res) => {
         "Product verification requires additional review because one or more verification checks failed.";
     }
 
-    // ========================================
     // SAVE VERIFICATION
-    // ========================================
     const verification = await Verification.create({
       product: product._id,
       verifiedBy: req.user?._id,
@@ -337,9 +298,7 @@ const verifyProduct = async (req, res) => {
       ipAddress: req.ip,
     });
 
-    // ========================================
     // CREATE NOTIFICATION
-    // ========================================
     try {
       const isAuthentic = verificationResult === "AUTHENTIC";
 
@@ -368,9 +327,7 @@ const verifyProduct = async (req, res) => {
       );
     }
 
-    // ========================================
     // FINAL RESPONSE
-    // ========================================
     return res.status(200).json({
       success: true,
       message: "Product verification completed",
@@ -425,15 +382,12 @@ const verifyProduct = async (req, res) => {
   }
 };
 
-// ==========================================
 // ADMIN - GET VERIFICATION HISTORY
-// ==========================================
 const getVerificationHistory = async (req, res) => {
   try {
     const { productId } = req.query;
     const query = {};
 
-    // Optional product filter.
     if (productId) {
       const normalizedProductId = String(productId)
         .trim()
@@ -483,9 +437,7 @@ const getVerificationHistory = async (req, res) => {
   }
 };
 
-// ====================
 // EXPORT
-// ====================
 module.exports = {
   verifyProduct,
   getVerificationHistory,
