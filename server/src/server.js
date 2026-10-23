@@ -1,4 +1,4 @@
-
+```js
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -28,7 +28,11 @@ connectDB();
 // ====================
 app.use(helmet());
 
+// ====================
+// CORS Configuration
+// ====================
 const allowedOrigins = [
+  "https://chaintrace-frontend.onrender.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:5174",
@@ -39,14 +43,22 @@ const allowedOrigins = [
   "http://127.0.0.1:8080",
   ...(process.env.FRONTEND_URL || "")
     .split(",")
-    .map((url) => url.trim())
+    .map((url) => url.trim().replace(/\/+$/, ""))
     .filter(Boolean),
 ];
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      // Allow requests without an Origin header,
+      // such as server-to-server or local health checks.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      const normalizedOrigin = origin.replace(/\/+$/, "");
+
+      if (allowedOrigins.includes(normalizedOrigin)) {
         return callback(null, true);
       }
 
@@ -108,8 +120,28 @@ app.use((req, res) => {
 });
 
 // ====================
+// Error Handler
+// ====================
+app.use((err, req, res, next) => {
+  if (err.message === "Origin not allowed by CORS") {
+    return res.status(403).json({
+      success: false,
+      message: "Origin not allowed by CORS",
+    });
+  }
+
+  console.error("Server error:", err.message);
+
+  return res.status(500).json({
+    success: false,
+    message: "Internal server error",
+  });
+});
+
+// ====================
 // Start Server
 // ====================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`ChainTrace server running on port ${PORT}`);
 });
+```
