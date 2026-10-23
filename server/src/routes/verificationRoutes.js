@@ -17,7 +17,6 @@ const router = express.Router();
 // Logged-in users can verify products
 router.post(
   "/",
-  protect,
   verifyProduct
 );
 
