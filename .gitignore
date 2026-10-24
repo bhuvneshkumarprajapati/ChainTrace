@@ -57,3 +57,8 @@ repair-ct-test-004.js
 postman/
 
 server/src/controllers/verificationController.js.backup
+
+# Local product data backups
+server/CT-2026-019-backup.json
+blockchain/scripts/checkProduct.ts.bak
+
