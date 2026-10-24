@@ -32,7 +32,11 @@ app.use(helmet());
 // CORS Configuration
 // ====================
 const allowedOrigins = [
+  // Production frontend
+  "https://chain-trace-red.vercel.app",
   "https://chaintrace-frontend.onrender.com",
+
+  // Local development
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:5174",
@@ -41,6 +45,8 @@ const allowedOrigins = [
   "http://127.0.0.1:5175",
   "http://localhost:8080",
   "http://127.0.0.1:8080",
+
+  // Additional frontend URLs from Render environment
   ...(process.env.FRONTEND_URL || "")
     .split(",")
     .map((url) => url.trim().replace(/\/+$/, ""))
@@ -50,8 +56,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests without an Origin header,
-      // such as server-to-server or local health checks.
+      // Allow requests without an Origin header
       if (!origin) {
         return callback(null, true);
       }
@@ -62,7 +67,8 @@ app.use(
         return callback(null, true);
       }
 
-      console.warn("Blocked by CORS: " + origin);
+      console.warn("Blocked by CORS:", origin);
+
       return callback(new Error("Origin not allowed by CORS"));
     },
     credentials: true,
