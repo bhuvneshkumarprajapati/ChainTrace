@@ -5,8 +5,14 @@ const { ethers } = require("ethers");
 // Environment
 // ==========================================
 const RPC_URL =
-  process.env.BLOCKCHAIN_RPC_URL ||
-  "http://127.0.0.1:8545";
+  process.env.SEPOLIA_RPC_URL ||
+  process.env.BLOCKCHAIN_RPC_URL;
+
+if (!RPC_URL) {
+  throw new Error(
+    "SEPOLIA_RPC_URL or BLOCKCHAIN_RPC_URL is missing"
+  );
+}
 
 const CONTRACT_ADDRESS =
   process.env.BLOCKCHAIN_CONTRACT_ADDRESS;
