@@ -55,10 +55,32 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+  blockchain-tests:
+    name: Blockchain Contract Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blockchain/package-lock.json
+
+      - name: Install blockchain dependencies
+        run: npm ci
+        working-directory: blockchain
+
+      - name: Run Hardhat tests
+        run: npm test
+        working-directory: blockchain
   docker-build:
     name: Docker Image Validation
     runs-on: ubuntu-latest
-    needs: [backend-tests, frontend-build]
+    needs: [backend-tests, frontend-build, blockchain-tests]
 
     steps:
       - name: Checkout repository
@@ -100,3 +122,5 @@ jobs:
           ignore-unfixed: true
           vuln-type: os,library
           severity: CRITICAL,HIGH
+
+
