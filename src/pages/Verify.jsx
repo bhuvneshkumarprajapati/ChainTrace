@@ -777,8 +777,35 @@ function VerificationResult({
 // VERIFIED PRODUCT
 // ==========================================
 function VerifiedProduct({ data }) {
-  const product = data.product;
-  const proof = data.proof;
+  const product = data.product || {};
+  const proof = data.proof || {};
+  const database = data.database || {};
+  const blockchain = data.blockchain || {};
+
+  // Support the current API response and older responses safely.
+  const databaseRecordFound = Boolean(product.id || product.productId);
+  const databaseIntegrityPassed =
+    typeof database.databaseVerified === "boolean"
+      ? database.databaseVerified
+      : Boolean(
+          proof.hashMatches &&
+          proof.qrMatches &&
+          product.status !== "FLAGGED"
+        );
+
+  const blockchainStatus =
+    blockchain.status || proof.blockchainStatus ||
+    (proof.blockchainVerified ? "VERIFIED" : "UNAVAILABLE");
+
+  const blockchainStatusLabel = {
+    VERIFIED: "Verified on-chain",
+    NOT_REGISTERED: "Not registered on-chain",
+    HASH_MISMATCH: "On-chain hash mismatch",
+    HASH_MISSING: "On-chain hash missing",
+    TEMPORARILY_UNAVAILABLE: "Provider temporarily unavailable",
+    UNAVAILABLE: "Blockchain proof unavailable",
+    ERROR: "Blockchain verification error",
+  }[blockchainStatus] || blockchainStatus.replaceAll("_", " ");
 
   const manufacturerName =
     product.manufacturer?.organization ||
@@ -942,28 +969,33 @@ function VerifiedProduct({ data }) {
           <div className="mt-7">
 
             <ProofRow
-              label="Hash match"
+              label="Database hash match"
               valid={proof?.hashMatches}
+              statusText={proof?.hashMatches ? "Valid" : "Mismatch"}
             />
 
             <ProofRow
               label="QR match"
               valid={proof?.qrMatches}
+              statusText={proof?.qrMatches ? "Valid" : "Mismatch"}
             />
 
             <ProofRow
               label="Blockchain proof"
-              valid={proof?.blockchainVerified}
+              valid={proof?.blockchainVerified === true || blockchain.verified === true}
+              statusText={blockchainStatusLabel}
             />
 
             <ProofRow
               label="Ownership"
               valid={proof?.ownershipValid}
+              statusText={proof?.ownershipValid ? "Valid" : "Not confirmed"}
             />
 
             <ProofRow
               label="Manufacturer"
               valid={proof?.manufacturerValid}
+              statusText={proof?.manufacturerValid ? "Valid" : "Not confirmed"}
             />
 
           </div>
@@ -986,12 +1018,18 @@ function VerifiedProduct({ data }) {
             <div className="mt-7">
 
               <div className="text-[9px] uppercase tracking-[0.18em] text-white/25">
-                Transaction
+                Stored transaction reference
               </div>
 
-              <code className="mt-2 block break-all text-xs text-[#36e6ad]">
+              <code className="mt-2 block break-all text-xs text-white/50">
                 {product.blockchainTxHash}
               </code>
+
+              {(!/^0x[a-fA-F0-9]{64}$/.test(String(product.blockchainTxHash).trim())) && (
+                <p className="mt-2 text-[10px] leading-5 text-yellow-300/80">
+                  This value does not look like a standard transaction hash. It is not proof of an on-chain transaction.
+                </p>
+              )}
 
             </div>
           )}
@@ -1013,35 +1051,46 @@ function VerifiedProduct({ data }) {
       </div>
 
       {/* STATUS */}
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 
         <StatusCard
           icon={PackageCheck}
-          title="Product registered"
-          text="Valid ChainTrace record"
-          valid={true}
+          title="Database record"
+          text={
+            databaseRecordFound
+              ? "Product record found"
+              : "Database record unavailable"
+          }
+          valid={databaseRecordFound}
+        />
+
+        <StatusCard
+          icon={Hash}
+          title="Database integrity"
+          text={
+            databaseIntegrityPassed
+              ? "Hash, QR and status checks passed"
+              : "Hash/QR mismatch or product flagged"
+          }
+          valid={databaseIntegrityPassed}
         />
 
         <StatusCard
           icon={ShieldCheck}
-          title="Proof verified"
-          text={
-            proof?.blockchainVerified
-              ? "Blockchain proof available"
-              : "Blockchain proof unavailable"
-          }
-          valid={proof?.blockchainVerified}
+          title="Blockchain registration"
+          text={blockchainStatusLabel}
+          valid={blockchainStatus === "VERIFIED" && (blockchain.verified === true || proof?.blockchainVerified === true)}
         />
 
         <StatusCard
           icon={CheckCircle2}
-          title="Ownership valid"
+          title="Ownership"
           text={
             proof?.ownershipValid
               ? "Current owner matches blockchain"
-              : "Ownership mismatch"
+              : "Ownership not confirmed"
           }
-          valid={proof?.ownershipValid}
+          valid={proof?.ownershipValid === true}
         />
 
       </div>
@@ -1078,6 +1127,7 @@ function Detail({
 function ProofRow({
   label,
   valid,
+  statusText,
 }) {
   return (
     <div className="flex items-center justify-between border-b border-white/5 py-3">
@@ -1089,12 +1139,16 @@ function ProofRow({
       {valid ? (
         <span className="flex items-center gap-1.5 text-[10px] text-[#36e6ad]">
           <CheckCircle2 size={13} />
-          Valid
+          {statusText || "Valid"}
         </span>
       ) : (
-        <span className="flex items-center gap-1.5 text-[10px] text-red-400">
+        <span className={`flex items-center gap-1.5 text-[10px] ${
+          statusText && /unavailable|not registered|not confirmed|missing|error/i.test(statusText)
+            ? "text-yellow-300"
+            : "text-red-400"
+        }`}>
           <XCircle size={13} />
-          Invalid
+          {statusText || "Invalid"}
         </span>
       )}
 
