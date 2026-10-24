@@ -1,3 +1,4 @@
+
 const { ethers } = require("ethers");
 
 // ==========================================
@@ -45,6 +46,8 @@ const contractABI = [
   "function verifyProduct(string _productId, string _productHash) external view returns (bool valid, address manufacturer, address currentOwner)",
 
   "function getProduct(string _productId) external view returns (string productId, string productHash, address manufacturer, address currentOwner, bool exists, uint256 registeredAt)",
+
+  "function getProductHistory(string _productId) external view returns (tuple(string eventType, address from, address to, string location, string description, uint256 timestamp)[])",
 
   "function productExists(string _productId) external view returns (bool)",
 ];
@@ -220,6 +223,68 @@ async function verifyProductOnBlockchain(
     manufacturer: result[1],
     currentOwner: result[2],
   };
+}
+
+// ==========================================
+// Get Product History From Blockchain
+// READ-ONLY: No transaction is sent
+// ==========================================
+async function getProductHistoryOnBlockchain(
+  productId
+) {
+  const normalizedProductId =
+    String(productId || "")
+      .trim()
+      .toUpperCase();
+
+  if (!normalizedProductId) {
+    throw new Error(
+      "Product ID is required"
+    );
+  }
+
+  const contract = getContract();
+
+  const exists =
+    await contract.productExists(
+      normalizedProductId
+    );
+
+  if (!exists) {
+    throw new Error(
+      `Product ${normalizedProductId} does not exist on the configured blockchain contract`
+    );
+  }
+
+  const history =
+    await contract.getProductHistory(
+      normalizedProductId
+    );
+
+  return history.map((event, index) => {
+    const timestamp = Number(event.timestamp);
+
+    // Ignore demo or implausibly old Unix timestamps.
+    // Jan 1, 2000 is used as a conservative lower bound.
+    const timestampISO =
+      Number.isFinite(timestamp) &&
+      timestamp >= 946684800
+        ? new Date(
+            timestamp * 1000
+          ).toISOString()
+        : null;
+
+    return {
+      index,
+      eventType: event.eventType,
+      from: event.from,
+      to: event.to,
+      location: event.location,
+      description: event.description,
+      timestamp: event.timestamp.toString(),
+      timestampISO,
+    };
+  });
 }
 
 // ==========================================
@@ -416,6 +481,8 @@ module.exports = {
   registerProductOnBlockchain,
 
   verifyProductOnBlockchain,
+
+  getProductHistoryOnBlockchain,
 
   transferProductOnBlockchain,
 };

@@ -6,6 +6,7 @@ const Notification = require("../models/Notification");
 
 const {
   transferProductOnBlockchain,
+  getProductHistoryOnBlockchain,
 } = require("../services/blockchainService");
 
 // ======================================================
@@ -100,8 +101,12 @@ const getProductHistory = async (req, res) => {
   try {
     const { productId } = req.params;
 
+    const normalizedProductId = String(productId || "")
+      .trim()
+      .toUpperCase();
+
     const product = await Product.findOne({
-      productId: productId.toUpperCase(),
+      productId: normalizedProductId,
     });
 
     if (!product) {
@@ -111,7 +116,8 @@ const getProductHistory = async (req, res) => {
       });
     }
 
-    const events = await SupplyChainEvent.find({
+    // 1. Read history stored in MongoDB.
+    const databaseEvents = await SupplyChainEvent.find({
       product: product._id,
     })
       .populate(
@@ -124,10 +130,43 @@ const getProductHistory = async (req, res) => {
       )
       .sort({ timestamp: 1 });
 
+    // 2. Read actual history from the blockchain contract.
+    let blockchainEvents = [];
+    let blockchainHistoryAvailable = false;
+    let blockchainHistoryError = null;
+
+    try {
+      blockchainEvents =
+        await getProductHistoryOnBlockchain(
+          normalizedProductId
+        );
+
+      blockchainHistoryAvailable = true;
+    } catch (blockchainError) {
+      blockchainHistoryError = blockchainError.message;
+
+      console.error(
+        `Blockchain history unavailable for ${normalizedProductId}:`,
+        blockchainError.message
+      );
+    }
+
     return res.status(200).json({
       success: true,
-      count: events.length,
-      events,
+
+      // Preserve the existing response fields for frontend compatibility.
+      count: databaseEvents.length,
+      events: databaseEvents,
+
+      // MongoDB history.
+      databaseEvents,
+      databaseHistoryCount: databaseEvents.length,
+
+      // Actual history read from the deployed contract.
+      blockchainEvents,
+      blockchainHistoryCount: blockchainEvents.length,
+      blockchainHistoryAvailable,
+      blockchainHistoryError,
     });
   } catch (error) {
     console.error("=================================");
@@ -362,9 +401,7 @@ const transferProduct = async (req, res) => {
 
     // ==================================================
     // BLOCKCHAIN TRANSFER
-    // IMPORTANT:
-    // BLOCKCHAIN FIRST
-    // MONGODB SECOND
+    // BLOCKCHAIN FIRST, MONGODB SECOND
     // ==================================================
 
     console.log(
@@ -380,10 +417,7 @@ const transferProduct = async (req, res) => {
         finalDescription
       );
 
-    console.log(
-      "Blockchain transfer successful:"
-    );
-
+    console.log("Blockchain transfer successful:");
     console.log(blockchainResult);
 
     // ==================================================
@@ -403,31 +437,16 @@ const transferProduct = async (req, res) => {
     // CREATE SUPPLY CHAIN EVENT
     // ==================================================
 
-    const event =
-      await SupplyChainEvent.create({
-        product: product._id,
-
-        eventType,
-
-        fromUser:
-          req.user._id,
-
-        toUser:
-          receiver._id,
-
-        location:
-          location ||
-          product.location,
-
-        description:
-          finalDescription,
-
-        blockchainTxHash:
-          blockchainResult.transactionHash,
-
-        blockNumber:
-          blockchainResult.blockNumber,
-      });
+    const event = await SupplyChainEvent.create({
+      product: product._id,
+      eventType,
+      fromUser: req.user._id,
+      toUser: receiver._id,
+      location: location || product.location,
+      description: finalDescription,
+      blockchainTxHash: blockchainResult.transactionHash,
+      blockNumber: blockchainResult.blockNumber,
+    });
 
     // ==================================================
     // CREATE AUDIT LOG
@@ -436,18 +455,14 @@ const transferProduct = async (req, res) => {
     try {
       await AuditLog.create({
         user: req.user._id,
-
         action: "PRODUCT_TRANSFERRED",
 
-        description:
-          isFinalDelivery
-            ? `Product ${product.productId} delivered from ${senderRole} to CUSTOMER.`
-            : `Product ${product.productId} transferred from ${senderRole} to ${receiverRole}.`,
+        description: isFinalDelivery
+          ? `Product ${product.productId} delivered from ${senderRole} to CUSTOMER.`
+          : `Product ${product.productId} transferred from ${senderRole} to ${receiverRole}.`,
 
         product: product._id,
-
         targetUser: receiver._id,
-
         ipAddress: req.ip,
 
         metadata: {
@@ -458,12 +473,9 @@ const transferProduct = async (req, res) => {
           receiverEmail: receiver.email,
           eventType,
           productStatus,
-          blockchainTxHash:
-            blockchainResult.transactionHash,
-          blockNumber:
-            blockchainResult.blockNumber,
-          location:
-            location || product.location || "",
+          blockchainTxHash: blockchainResult.transactionHash,
+          blockNumber: blockchainResult.blockNumber,
+          location: location || product.location || "",
         },
       });
 
@@ -498,7 +510,7 @@ const transferProduct = async (req, res) => {
           : `Product ${product.productId} has been transferred to you by ${
               req.user.organization || req.user.name
             }.`,
-          
+
         product: product._id,
       });
 
@@ -506,8 +518,7 @@ const transferProduct = async (req, res) => {
         `Notification created for ${receiver.email}`
       );
     } catch (notificationError) {
-      // Notification failure should not undo
-      // successful blockchain transfer.
+      // Notification failure should not undo a successful blockchain transfer.
       console.error(
         "NOTIFICATION ERROR:",
         notificationError.message
@@ -538,27 +549,18 @@ const transferProduct = async (req, res) => {
     return res.status(200).json({
       success: true,
 
-      message:
-        isFinalDelivery
-          ? "Product delivered successfully on blockchain"
-          : "Product transferred successfully on blockchain",
+      message: isFinalDelivery
+        ? "Product delivered successfully on blockchain"
+        : "Product transferred successfully on blockchain",
 
       product,
-
       event,
 
       blockchain: {
-        transactionHash:
-          blockchainResult.transactionHash,
-
-        blockNumber:
-          blockchainResult.blockNumber,
-
-        from:
-          blockchainResult.from,
-
-        to:
-          blockchainResult.to,
+        transactionHash: blockchainResult.transactionHash,
+        blockNumber: blockchainResult.blockNumber,
+        from: blockchainResult.from,
+        to: blockchainResult.to,
       },
     });
   } catch (error) {
@@ -567,22 +569,13 @@ const transferProduct = async (req, res) => {
     console.error("=================================");
     console.error(error);
 
-    console.error(
-      "Message:",
-      error.message
-    );
-
-    console.error(
-      "Stack:",
-      error.stack
-    );
+    console.error("Message:", error.message);
+    console.error("Stack:", error.stack);
 
     return res.status(500).json({
       success: false,
-      message:
-        "Failed to transfer product",
-      error:
-        error.message,
+      message: "Failed to transfer product",
+      error: error.message,
     });
   }
 };
