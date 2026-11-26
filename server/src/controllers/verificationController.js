@@ -105,16 +105,10 @@ const verifyProduct = async (req, res) => {
     // QR currently contains the Product ID.
     const qrCode = String(product.qrCode || "").trim();
 
-    const qrMatches = qrCode
-      ? (
-          normalizedProductId === qrCode.toUpperCase() ||
-          normalizedScannedValue === qrCode ||
-          normalizedScannedValue === normalizedProductId
-        )
-      : (
-          !normalizedScannedValue ||
-          normalizedScannedValue === normalizedProductId
-        );
+    // Manual lookup is allowed; supplied QR data must match the registry.
+    const qrMatches = normalizedScannedValue
+      ? normalizedScannedValue.toUpperCase() === (qrCode || normalizedProductId).toUpperCase()
+      : true;
 
     // Recalculate hash from the stored product details.
     const recalculatedProductHash = generateProductHash({
@@ -377,7 +371,6 @@ const verifyProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error during product verification",
-      error: error.message,
     });
   }
 };
