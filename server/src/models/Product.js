@@ -43,6 +43,12 @@ const productSchema = new mongoose.Schema(
       trim: true,
     },
 
+    registrationLocation: {
+      type: String,
+      trim: true,
+      immutable: true,
+    },
+
     productHash: {
       type: String,
       required: true,
