@@ -1,6 +1,9 @@
 
 services:
   frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: chaintrace-frontend
     container_name: chaintrace-frontend
     ports:
