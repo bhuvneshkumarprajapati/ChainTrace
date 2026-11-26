@@ -39,6 +39,26 @@ function walletProofMessage(userId, challenge) {
   ].join("\n");
 }
 
+// Read-only migration assessment; never changes wallet or ownership.
+router.get("/wallet/migration-readiness", protect, async (req, res) => {
+  try {
+    const address = String(req.user.walletAddress || "").toLowerCase();
+    const [ownedProducts, manufacturedProducts] = await Promise.all([
+      Product.countDocuments({ currentOwner: req.user._id }),
+      Product.countDocuments({ manufacturer: req.user._id }),
+    ]);
+    const linked = ownedProducts > 0 || manufacturedProducts > 0;
+    const walletStatus = !address ? "MISSING" : !isAddress(address) ? "INVALID" :
+      publicTestWallets.has(address) ? "PUBLIC_TEST_WALLET" : "EXISTING_WALLET";
+    return res.json({ success: true, walletStatus, ownedProducts, manufacturedProducts,
+      assessment: linked ? "LINKED_PRODUCTS_REQUIRE_RECONCILIATION" :
+        address ? "EXISTING_WALLET_REQUIRES_REVIEW" : "NO_LINKED_PRODUCTS_FOUND",
+      migrationAuthorized: false });
+  } catch {
+    return res.status(500).json({ success: false, message: "Unable to assess wallet migration" });
+  }
+});
+
 router.post("/wallet/challenge", protect, walletProofLimiter, async (req, res) => {
   try {
     const address = String(req.user.walletAddress || "").toLowerCase();
