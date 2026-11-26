@@ -22,6 +22,12 @@ const walletProofLimiter = rateLimit({
 });
 const { isAddress, verifyMessage } = require("ethers");
 
+// Reject the first 20 accounts derived from the publicly documented Hardhat test mnemonic.
+const { HDNodeWallet } = require("ethers");
+const publicTestWallets = new Set(Array.from({ length: 20 }, (_, i) =>
+  HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined, "m/44'/60'/0'/0/" + i).address.toLowerCase()
+));
+
 function walletProofMessage(userId, challenge) {
   return [
     "ChainTrace wallet ownership verification",
@@ -37,6 +43,7 @@ router.post("/wallet/challenge", protect, walletProofLimiter, async (req, res) =
   try {
     const address = String(req.user.walletAddress || "").toLowerCase();
     if (!isAddress(address)) return res.status(409).json({ success: false, message: "No valid existing wallet" });
+    if (publicTestWallets.has(address)) return res.status(409).json({ success: false, message: "Public test wallet is not eligible for verification. Secure migration required." });
     const challenge = { address, nonce: randomBytes(32).toString("hex"), expiresAt: new Date(Date.now() + 300000) };
     const result = await User.updateOne({ _id: req.user._id, walletAddress: address }, { $set: { walletChallenge: challenge } });
     if (!result.matchedCount) return res.status(409).json({ success: false, message: "Wallet changed; retry" });
@@ -53,6 +60,7 @@ router.post("/wallet/verify", protect, walletProofLimiter, async (req, res) => {
     const user = await User.findById(req.user._id).select("walletAddress +walletChallenge");
     const c = user?.walletChallenge;
     if (!c || c.expiresAt <= new Date() || c.address !== user.walletAddress) return res.status(409).json({ success: false, message: "Request a fresh wallet challenge" });
+    if (publicTestWallets.has(c.address)) return res.status(409).json({ success: false, message: "Public test wallet is not eligible for verification. Secure migration required." });
     let signer;
     try { signer = verifyMessage(walletProofMessage(user._id, c), signature).toLowerCase(); }
     catch { return res.status(400).json({ success: false, message: "Invalid signature" }); }
