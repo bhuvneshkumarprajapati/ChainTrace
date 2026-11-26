@@ -7,6 +7,7 @@ const Notification = require("../models/Notification");
 const {
   transferProductOnBlockchain,
   getProductHistoryOnBlockchain,
+  getWalletForAddress,
 } = require("../services/blockchainService");
 
 // ======================================================
@@ -360,6 +361,22 @@ const transferProduct = async (req, res) => {
       });
     }
 
+    // Fail before broadcasting a transaction when the signer is not configured.
+    // Never substitute the manufacturer's key for another owner's wallet.
+    try {
+      getWalletForAddress(senderWalletAddress);
+    } catch (signerError) {
+      if (String(signerError.message).startsWith("No private key configured for wallet address:")) {
+        return res.status(503).json({
+          success: false,
+          code: "SENDER_WALLET_NOT_CONFIGURED",
+          message: "This owner wallet cannot sign transfers on the server. Configure an authorized signing wallet before retrying.",
+          retryable: false,
+        });
+      }
+      throw signerError;
+    }
+
     // ==================================================
     // LOG TRANSFER
     // ==================================================
@@ -575,7 +592,6 @@ const transferProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to transfer product",
-      error: error.message,
     });
   }
 };
