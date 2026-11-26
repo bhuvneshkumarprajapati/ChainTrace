@@ -294,6 +294,8 @@ function formatDate(date) {
 export default function Dashboard() {
 
   const [user, setUser] = useState(null);
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletNotice, setWalletNotice] = useState("");
 
   const [products, setProducts] = useState([]);
 
@@ -622,6 +624,31 @@ export default function Dashboard() {
   };
 
 
+
+  const verifyWallet = async () => {
+    if (walletBusy || !user?.walletAddress) return;
+    setWalletBusy(true);
+    setWalletNotice("");
+    try {
+      const provider = window.ethereum;
+      if (!provider?.request) throw new Error("Install MetaMask or another compatible browser wallet.");
+      const accounts = await provider.request({ method: "eth_requestAccounts" });
+      const address = accounts?.[0];
+      if (!address || address.toLowerCase() !== user.walletAddress.toLowerCase()) {
+        throw new Error("Select the wallet registered to your ChainTrace account. Do not import public test keys.");
+      }
+      const { data } = await api.post("/users/wallet/challenge");
+      const messageHex = "0x" + Array.from(new TextEncoder().encode(data.message), byte => byte.toString(16).padStart(2, "0")).join("");
+      const signature = await provider.request({ method: "personal_sign", params: [messageHex, address] });
+      const result = await api.post("/users/wallet/verify", { signature });
+      setUser(prev => ({ ...prev, walletProof: { address: result.data.walletAddress, verifiedAt: result.data.verifiedAt } }));
+      setWalletNotice("Wallet signature verified. This does not authorize a product transfer.");
+    } catch (err) {
+      setWalletNotice(err.response?.data?.message || (err.code === 4001 ? "Wallet request cancelled." : err.message || "Wallet verification failed."));
+    } finally {
+      setWalletBusy(false);
+    }
+  };
 
   const copyWallet = async () => {
 
@@ -1381,7 +1408,7 @@ export default function Dashboard() {
 
                   <p className="text-xs text-zinc-500">
 
-                    Connected Wallet
+                    Registered Wallet
 
                   </p>
 
@@ -1389,7 +1416,7 @@ export default function Dashboard() {
 
                   <p className="mt-1 text-xs text-emerald-300">
 
-                    Local Hardhat Network
+                    {user.walletProof?.verifiedAt && user.walletProof?.address?.toLowerCase() === user.walletAddress?.toLowerCase() ? "Signature previously verified" : "Signature not verified"}
 
                   </p>
 
@@ -1406,6 +1433,12 @@ export default function Dashboard() {
                   "No wallet address configured"}
 
               </p>
+              <button type="button" disabled={walletBusy || !user.walletAddress} onClick={verifyWallet}
+                className="mt-4 rounded-xl border border-emerald-400/30 px-4 py-2 text-sm text-emerald-300 disabled:opacity-50">
+                {walletBusy ? "Waiting for wallet..." : "Connect & verify wallet"}
+              </button>
+              <p className="mt-2 text-xs text-zinc-400">Sign a message only. No transaction or gas fee. Never use public test keys for production.</p>
+              {walletNotice && <p role="status" className="mt-2 text-xs text-zinc-300">{walletNotice}</p>}
 
             </div>
 
