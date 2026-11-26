@@ -1,7 +1,9 @@
 FROM node:22-alpine AS dependencies
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm pkg set 'overrides.body-parser=2.4.0' 'dependencies.mongoose=8.24.7' \
+    && npm install --package-lock-only --ignore-scripts \
+    && npm ci --omit=dev
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
