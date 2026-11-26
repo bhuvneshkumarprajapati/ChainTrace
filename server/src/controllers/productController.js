@@ -109,6 +109,7 @@ const createProduct = async (req, res) => {
       currentOwner: req.user._id,
       location,
 
+      registrationLocation: String(location ?? "").trim(),
       productHash: generatedProductHash,// Hash is generated from product details below
       ipfsHash,
 
