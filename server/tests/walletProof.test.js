@@ -31,6 +31,32 @@ async function main() {
       });
       return { status: res.status, body: await res.json() };
     };
+    const Product = require("../src/models/Product");
+    let owned = 2;
+    Product.countDocuments = async filter => filter.currentOwner ? owned : 0;
+    const readiness = async (authenticated = true) => {
+      const res = await fetch("http://127.0.0.1:" + server.address().port + "/users/wallet/migration-readiness", {
+        headers: authenticated ? { Authorization: "Bearer " + token } : {}
+      });
+      return { status: res.status, body: await res.json() };
+    };
+    assert.equal((await readiness(false)).status, 401);
+    const originalAddress = user.walletAddress;
+    user.walletAddress = "0x70997970c51812dc3a010c7d01b50e0d17dc79c8";
+    let assessment = await readiness();
+    assert.equal(assessment.status, 200);
+    assert.equal(assessment.body.walletStatus, "PUBLIC_TEST_WALLET");
+    assert.equal(assessment.body.ownedProducts, 2);
+    assert.equal(assessment.body.assessment, "LINKED_PRODUCTS_REQUIRE_RECONCILIATION");
+    assert.equal(assessment.body.migrationAuthorized, false);
+    owned = 0;
+    user.walletAddress = "";
+    assessment = await readiness();
+    assert.equal(assessment.body.walletStatus, "MISSING");
+    assert.equal(assessment.body.assessment, "NO_LINKED_PRODUCTS_FOUND");
+    assert.equal(assessment.body.migrationAuthorized, false);
+    assert.equal(user.walletAddress, "");
+    user.walletAddress = originalAddress;
     assert.equal((await call("challenge", {}, false)).status, 401);
     let challenge = await call("challenge");
     assert.equal(challenge.status, 200);
