@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "node tests/productHashService.test.js && node tests/verificationLogic.test.js && node tests/productTampering.test.js"
+    "test": "node tests/productHashService.test.js && node tests/verificationLogic.test.js && node tests/productTampering.test.js && node tests/walletProof.test.js"
   },
   "keywords": [],
   "author": "",
