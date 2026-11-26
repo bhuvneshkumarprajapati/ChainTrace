@@ -1,5 +1,6 @@
 
 const Product = require("../models/Product");
+const { matchesProductQr } = require("../services/qrVerification");
 const Verification = require("../models/Verification");
 const Notification = require("../models/Notification");
 const {
@@ -106,9 +107,7 @@ const verifyProduct = async (req, res) => {
     const qrCode = String(product.qrCode || "").trim();
 
     // Manual lookup is allowed; supplied QR data must match the registry.
-    const qrMatches = normalizedScannedValue
-      ? normalizedScannedValue.toUpperCase() === (qrCode || normalizedProductId).toUpperCase()
-      : true;
+    const qrMatches = matchesProductQr(normalizedProductId, qrCode, normalizedScannedValue);
 
     // Recalculate hash from the stored product details.
     const recalculatedProductHash = generateProductHash({
