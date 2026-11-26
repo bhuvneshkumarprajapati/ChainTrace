@@ -6,6 +6,8 @@ services:
       dockerfile: Dockerfile
     image: chaintrace-frontend
     container_name: chaintrace-frontend
+    environment:
+      API_PROXY_TARGET: http://backend:5000
     ports:
       - "5173:5173"
     depends_on:
