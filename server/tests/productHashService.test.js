@@ -37,3 +37,8 @@ assert.notEqual(
 );
 
 console.log("PASS: All 4 product hash tests passed.");
+
+const transferred = { ...product, registrationLocation: product.location, location: "Mumbai, India", status: "IN_TRANSIT" };
+assert.equal(generateProductHash({ ...transferred, location: transferred.registrationLocation }), originalHash);
+assert.notEqual(generateProductHash({ ...transferred, location: transferred.registrationLocation, name: "Tampered" }), originalHash);
+console.log("PASS: Transfer location and tampering hash regression checks");
