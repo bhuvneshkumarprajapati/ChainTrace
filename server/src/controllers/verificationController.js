@@ -1,5 +1,6 @@
 
 const Product = require("../models/Product");
+const SupplyChainEvent = require("../models/SupplyChainEvent");
 const { matchesProductQr } = require("../services/qrVerification");
 const Verification = require("../models/Verification");
 const Notification = require("../models/Notification");
@@ -110,12 +111,23 @@ const verifyProduct = async (req, res) => {
     const qrMatches = matchesProductQr(normalizedProductId, qrCode, normalizedScannedValue);
 
     // Recalculate hash from the stored product details.
+    // Registration location is immutable; current location changes during transfers.
+    // Legacy records recover the original location from the registration event.
+    let registrationLocation = product.registrationLocation;
+    if (registrationLocation === undefined) {
+      const registration = await SupplyChainEvent.findOne({
+        product: product._id,
+        eventType: "MANUFACTURED",
+        blockchainTxHash: product.blockchainTxHash,
+      }).sort({ timestamp: 1 });
+      registrationLocation = registration?.location ?? product.location;
+    }
     const recalculatedProductHash = generateProductHash({
       productId: product.productId,
       name: product.name,
       description: product.description,
       category: product.category,
-      location: product.location,
+      location: registrationLocation,
       ipfsHash: product.ipfsHash,
     });
 
