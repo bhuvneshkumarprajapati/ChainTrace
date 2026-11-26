@@ -1,5 +1,6 @@
 
 const Product = require("../models/Product");
+const { matchesProductQr } = require("../services/qrVerification");
 const Verification = require("../models/Verification");
 const Notification = require("../models/Notification");
 const {
@@ -105,16 +106,8 @@ const verifyProduct = async (req, res) => {
     // QR currently contains the Product ID.
     const qrCode = String(product.qrCode || "").trim();
 
-    const qrMatches = qrCode
-      ? (
-          normalizedProductId === qrCode.toUpperCase() ||
-          normalizedScannedValue === qrCode ||
-          normalizedScannedValue === normalizedProductId
-        )
-      : (
-          !normalizedScannedValue ||
-          normalizedScannedValue === normalizedProductId
-        );
+    // Manual lookup is allowed; supplied QR data must match the registry.
+    const qrMatches = matchesProductQr(normalizedProductId, qrCode, normalizedScannedValue);
 
     // Recalculate hash from the stored product details.
     const recalculatedProductHash = generateProductHash({
@@ -377,7 +370,6 @@ const verifyProduct = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error during product verification",
-      error: error.message,
     });
   }
 };

@@ -51,3 +51,11 @@ assert.deepEqual(
 );
 
 console.log("PASS: All 4 verification logic tests passed.");
+
+const { matchesProductQr } = require('../src/services/qrVerification');
+assert.equal(matchesProductQr('CT-001', 'CT-001', 'WRONG'), false);
+assert.equal(matchesProductQr('CT-001', 'CT-001', 'ct-001'), true);
+assert.equal(matchesProductQr('CT-001', 'CT-001', ''), true);
+assert.equal(matchesProductQr('CT-001', '', 'WRONG'), false);
+assert.equal(matchesProductQr('CT-001', '', 'CT-001'), true);
+console.log('PASS: QR regression tests');

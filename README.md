@@ -1,16 +1,71 @@
-# React + Vite
+# ChainTrace
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Blockchain-powered supply chain tracking and product verification platform built with React, Node.js, MongoDB and Solidity.
 
-Currently, two official plugins are available:
+## Architecture
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `src/`: React and Vite frontend.
+- `server/`: Express API, MongoDB persistence and authentication.
+- `blockchain/`: Hardhat smart contract project and tests.
+- `docker-compose.yml`: development frontend, production frontend and backend services.
 
-## React Compiler
+## Local development
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Install Node.js 22 (use a current patch release), npm and Git. Docker Compose v2 is required for container-based development.
 
-## Expanding the ESLint configuration
+```sh
+git clone https://github.com/bhuvneshkumarprajapati/ChainTrace.git
+cd ChainTrace
+npm ci
+npm --prefix server ci
+npm --prefix blockchain ci
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Configure `server/.env` before starting the API. The database connection requires `MONGO_URI`. Configure authentication and blockchain credentials according to the server configuration. Never commit real credentials or private keys. Set `SEPOLIA_RPC_URL` in your shell or Compose environment when using Sepolia with Docker.
+
+```sh
+npm --prefix server run dev
+# In another terminal:
+npm run dev
+```
+
+## Docker
+
+After configuring the environment, run:
+
+```sh
+docker compose up --build -d
+docker compose ps
+docker compose logs backend
+```
+
+Development frontend: http://localhost:5173
+
+Production frontend: http://localhost:8080
+
+Backend readiness: http://localhost:5000/api/health
+
+Stop containers with `docker compose down`. MongoDB must be reachable from the backend container; localhost inside a container refers to that container.
+
+## Verification
+
+```sh
+npm run lint
+npm run build
+npm --prefix server test
+npm --prefix blockchain test
+```
+
+Run these checks before opening a pull request. A successful frontend build alone does not establish end-to-end blockchain or database functionality.
+
+## Deployment
+
+The existing frontend URL is https://chain-trace-red.vercel.app (availability and end-to-end functionality must be verified). Vercel can build the root frontend; the backend can be deployed separately from `server/` on Render. Configure the API URL, allowed frontend origins, database and blockchain credentials for the target environment.
+
+## Contributing
+
+Create a branch, make focused changes, run relevant checks, and open a pull request describing the changes and test results. Do not include secrets, generated dependencies or production credentials.
+
+## License
+
+A repository-wide license has not yet been selected. Public visibility alone does not grant permission to reuse or redistribute the code.
