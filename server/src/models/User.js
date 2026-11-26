@@ -59,6 +59,18 @@ const userSchema = new mongoose.Schema(
     // ====================
     // Blockchain Wallet
     // ====================
+    walletProof: {
+      address: { type: String, lowercase: true },
+      verifiedAt: Date,
+    },
+    walletChallenge: {
+      type: new mongoose.Schema({
+        nonce: String,
+        address: String,
+        expiresAt: Date,
+      }, { _id: false }),
+      select: false,
+    },
     walletAddress: {
       type: String,
       trim: true,

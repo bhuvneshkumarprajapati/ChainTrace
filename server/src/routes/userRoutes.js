@@ -10,6 +10,71 @@ const AuditLog = require("../models/AuditLog");
 
 const router = express.Router();
 
+const { randomBytes } = require("node:crypto");
+const { rateLimit } = require("express-rate-limit");
+const walletProofLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  keyGenerator: (req) => String(req.user._id),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { success: false, message: "Too many wallet verification requests. Retry later." },
+});
+const { isAddress, verifyMessage } = require("ethers");
+
+// Reject the first 20 accounts derived from the publicly documented Hardhat test mnemonic.
+const { HDNodeWallet } = require("ethers");
+const publicTestWallets = new Set(Array.from({ length: 20 }, (_, i) =>
+  HDNodeWallet.fromPhrase("test test test test test test test test test test test junk", undefined, "m/44'/60'/0'/0/" + i).address.toLowerCase()
+));
+
+function walletProofMessage(userId, challenge) {
+  return [
+    "ChainTrace wallet ownership verification",
+    "Purpose: prove control of the existing account wallet only.",
+    "Account: " + userId,
+    "Wallet: " + challenge.address,
+    "Nonce: " + challenge.nonce,
+    "Expires: " + new Date(challenge.expiresAt).toISOString(),
+  ].join("\n");
+}
+
+router.post("/wallet/challenge", protect, walletProofLimiter, async (req, res) => {
+  try {
+    const address = String(req.user.walletAddress || "").toLowerCase();
+    if (!isAddress(address)) return res.status(409).json({ success: false, message: "No valid existing wallet" });
+    if (publicTestWallets.has(address)) return res.status(409).json({ success: false, message: "Public test wallet is not eligible for verification. Secure migration required." });
+    const challenge = { address, nonce: randomBytes(32).toString("hex"), expiresAt: new Date(Date.now() + 300000) };
+    const result = await User.updateOne({ _id: req.user._id, walletAddress: address }, { $set: { walletChallenge: challenge } });
+    if (!result.matchedCount) return res.status(409).json({ success: false, message: "Wallet changed; retry" });
+    return res.json({ success: true, message: walletProofMessage(req.user._id, challenge), expiresAt: challenge.expiresAt });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Unable to create wallet challenge" });
+  }
+});
+
+router.post("/wallet/verify", protect, walletProofLimiter, async (req, res) => {
+  try {
+    const signature = req.body?.signature;
+    if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return res.status(400).json({ success: false, message: "Invalid signature format" });
+    const user = await User.findById(req.user._id).select("walletAddress +walletChallenge");
+    const c = user?.walletChallenge;
+    if (!c || c.expiresAt <= new Date() || c.address !== user.walletAddress) return res.status(409).json({ success: false, message: "Request a fresh wallet challenge" });
+    if (publicTestWallets.has(c.address)) return res.status(409).json({ success: false, message: "Public test wallet is not eligible for verification. Secure migration required." });
+    let signer;
+    try { signer = verifyMessage(walletProofMessage(user._id, c), signature).toLowerCase(); }
+    catch { return res.status(400).json({ success: false, message: "Invalid signature" }); }
+    if (signer !== c.address) return res.status(403).json({ success: false, message: "Signature does not match existing wallet" });
+    const verifiedAt = new Date();
+    const result = await User.updateOne({ _id: user._id, walletAddress: c.address, "walletChallenge.nonce": c.nonce, "walletChallenge.expiresAt": { $gt: verifiedAt } }, { $unset: { walletChallenge: 1 }, $set: { walletProof: { address: c.address, verifiedAt } } });
+    if (!result.modifiedCount) return res.status(409).json({ success: false, message: "Challenge expired or already used" });
+    return res.json({ success: true, walletAddress: c.address, verifiedAt });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Unable to verify wallet" });
+  }
+});
+
+
 // =====================================================
 // GET CURRENT USER
 // =====================================================
