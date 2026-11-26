@@ -9,14 +9,23 @@ const {
 } = require("../controllers/verificationController");
 
 const router = express.Router();
+const { rateLimit } = require("express-rate-limit");
+const verificationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { success: false, message: "Too many verification requests. Try again shortly." },
+});
 
 // ==========================================
 // VERIFY PRODUCT
 // ==========================================
 
-// Logged-in users can verify products
+// Public verification, with abuse protection
 router.post(
   "/",
+  verificationLimiter,
   verifyProduct
 );
 
