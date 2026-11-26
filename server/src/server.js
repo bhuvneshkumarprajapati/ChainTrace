@@ -1,5 +1,6 @@
 
 const express = require("express");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
@@ -21,7 +22,7 @@ const PORT = process.env.PORT || 5000;
 // ====================
 // Database
 // ====================
-connectDB();
+// Database connection is established before accepting requests.
 
 // ====================
 // Security
@@ -108,10 +109,11 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "ChainTrace backend is healthy",
-    database: "MongoDB",
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({
+    success: ready,
+    message: ready ? "ChainTrace backend is healthy" : "Database unavailable",
+    database: ready ? "connected" : "disconnected",
   });
 });
 
@@ -147,6 +149,11 @@ app.use((err, req, res, next) => {
 // ====================
 // Start Server
 // ====================
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("ChainTrace server running on port " + PORT);
+connectDB().then(() => {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log("ChainTrace server running on port " + PORT);
+  });
+}).catch((error) => {
+  console.error("Server startup failed:", error.message);
+  process.exit(1);
 });
