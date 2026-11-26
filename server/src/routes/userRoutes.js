@@ -11,6 +11,15 @@ const AuditLog = require("../models/AuditLog");
 const router = express.Router();
 
 const { randomBytes } = require("node:crypto");
+const { rateLimit } = require("express-rate-limit");
+const walletProofLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 20,
+  keyGenerator: (req) => String(req.user._id),
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { success: false, message: "Too many wallet verification requests. Retry later." },
+});
 const { isAddress, verifyMessage } = require("ethers");
 
 function walletProofMessage(userId, challenge) {
@@ -24,7 +33,7 @@ function walletProofMessage(userId, challenge) {
   ].join("\n");
 }
 
-router.post("/wallet/challenge", protect, async (req, res) => {
+router.post("/wallet/challenge", protect, walletProofLimiter, async (req, res) => {
   try {
     const address = String(req.user.walletAddress || "").toLowerCase();
     if (!isAddress(address)) return res.status(409).json({ success: false, message: "No valid existing wallet" });
@@ -37,7 +46,7 @@ router.post("/wallet/challenge", protect, async (req, res) => {
   }
 });
 
-router.post("/wallet/verify", protect, async (req, res) => {
+router.post("/wallet/verify", protect, walletProofLimiter, async (req, res) => {
   try {
     const signature = req.body?.signature;
     if (typeof signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(signature)) return res.status(400).json({ success: false, message: "Invalid signature format" });
